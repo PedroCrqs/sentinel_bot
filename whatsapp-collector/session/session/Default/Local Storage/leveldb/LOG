@@ -1,0 +1,6 @@
+2026/01/26-20:19:50.198 bbc Reusing MANIFEST C:\Users\Majesto\Desktop\main-project-database\sentinel_bot\whatsapp-collector\session\session\Default\Local Storage\leveldb/MANIFEST-000001
+2026/01/26-20:19:50.385 bbc Recovering log #3
+2026/01/26-20:19:50.489 bbc Reusing old log C:\Users\Majesto\Desktop\main-project-database\sentinel_bot\whatsapp-collector\session\session\Default\Local Storage\leveldb/000003.log 
+2026/01/26-20:20:50.592 bbc Level-0 table #5: started
+2026/01/26-20:20:50.611 bbc Level-0 table #5: 19170 bytes OK
+2026/01/26-20:20:50.616 bbc Delete type=0 #3
