@@ -1,0 +1,12 @@
+.wwebjs_auth/
+.wwebjs_cache/
+session/
+auth_info.json
+.cache/
+极速/
+node_modules/
+__pycache__/
+*.pyc
+.env
+messages.jsonl
+*.log
