@@ -6,9 +6,31 @@ const crypto = require("crypto");
 
 const SESSION_PATH = path.join(__dirname, "session");
 const OUTPUT_FILE = path.join(__dirname, "messages.jsonl");
-const DEDUP_WINDOW_SECONDS = 120;
+const DEDUP_WINDOW = 7776000;
 
-const dedupCache = new Map();
+const knownIds = new Set();
+const lastSeenAds = new Map();
+
+if (fs.existsSync(OUTPUT_FILE)) {
+  const fileContent = fs.readFileSync(OUTPUT_FILE, "utf-8");
+  fileContent.split("\n").forEach((line) => {
+    if (line.trim()) {
+      try {
+        const parsed = JSON.parse(line);
+        knownIds.add(parsed.message_id);
+        if (parsed.ad_hash) {
+          const key = `${parsed.author_id}_${parsed.ad_hash}`;
+          if (
+            !lastSeenAds.has(key) ||
+            parsed.timestamp > lastSeenAds.get(key)
+          ) {
+            lastSeenAds.set(key, parsed.timestamp);
+          }
+        }
+      } catch (e) {}
+    }
+  });
+}
 
 if (!fs.existsSync(SESSION_PATH)) {
   fs.mkdirSync(SESSION_PATH, { recursive: true });
@@ -27,80 +49,61 @@ const client = new Client({
 });
 
 client.on("qr", (qr) => {
-  console.log("\nEscaneie o QR Code:\n");
   qrcode.generate(qr, { small: true });
 });
 
 client.once("ready", () => {
-  console.log("\n✓ WhatsApp conectado");
-  console.log("✓ Coletando mensagens de grupos");
-  console.log("✓ Arquivo:", OUTPUT_FILE, "\n");
+  console.log("✓ Sentinela Ativo");
 });
 
-client.on("auth_failure", (msg) => {
-  console.error("Erro de autenticação:", msg);
-});
-
-client.on("disconnected", (reason) => {
-  console.warn("Desconectado:", reason);
-});
-
-const normalizeText = (text) =>
-  text
-    .toLowerCase()
-    .replace(/\s+/g, " ")
-    .replace(/[^\p{L}\p{N}\s]/gu, "")
-    .trim();
-
-const generateHash = (authorId, text) =>
-  crypto
+const generateHash = (text) => {
+  return crypto
     .createHash("sha256")
-    .update(authorId + "|" + text)
+    .update(text.toLowerCase().replace(/\s+/g, "").trim())
     .digest("hex");
+};
 
 client.on("message", async (message) => {
   try {
-    if (!message.body) return;
+    if (!message.body || knownIds.has(message.id.id)) return;
 
     const chat = await message.getChat();
     if (!chat.isGroup) return;
 
     const authorId = message.author || message.from;
-    const hash = generateHash(authorId, normalizeText(message.body));
+    const adHash = generateHash(message.body);
+    const adKey = `${authorId}_${adHash}`;
     const now = Math.floor(Date.now() / 1000);
 
-    for (const [key, ts] of dedupCache.entries()) {
-      if (now - ts > DEDUP_WINDOW_SECONDS) dedupCache.delete(key);
+    if (lastSeenAds.has(adKey)) {
+      const lastTimestamp = lastSeenAds.get(adKey);
+      if (now - lastTimestamp < DEDUP_WINDOW) return;
     }
 
-    if (dedupCache.has(hash)) return;
-    dedupCache.set(hash, now);
-
     const contact = await message.getContact();
-    const phone = contact.number || contact.id?.user || null;
-
     const payload = {
       message_id: message.id.id,
       group_id: chat.id._serialized,
       group_name: chat.name,
       author_id: authorId,
       author_name: contact.pushname || contact.name || "Desconhecido",
-      author_phone: phone,
+      author_phone: contact.number || contact.id?.user || null,
       message: message.body,
+      ad_hash: adHash,
       timestamp: message.timestamp,
     };
 
     fs.appendFileSync(OUTPUT_FILE, JSON.stringify(payload) + "\n", {
       encoding: "utf-8",
     });
+    knownIds.add(payload.message_id);
+    lastSeenAds.set(adKey, payload.timestamp);
 
     console.log(
-      `[${new Date(payload.timestamp * 1000).toISOString()}] ` +
-        `[${payload.group_name}] ` +
-        `${payload.author_name}: ${payload.message.substring(0, 50)}`,
+      `[CAPTURADO] ${payload.author_name}: ${payload.message.substring(0, 50)}`,
     );
   } catch (error) {
-    console.error("Erro:", error.message);
+    console.error(error.message);
   }
 });
 
