@@ -39,7 +39,7 @@ if (!fs.existsSync(SESSION_PATH)) {
 const client = new Client({
   authStrategy: new LocalAuth({ dataPath: SESSION_PATH }),
   puppeteer: {
-    headless: false,
+    headless: true,
     args: [
       "--no-sandbox",
       "--disable-setuid-sandbox",
@@ -52,8 +52,28 @@ client.on("qr", (qr) => {
   qrcode.generate(qr, { small: true });
 });
 
+client.once("authenticated", () => {
+  console.log("=".repeat(80));
+  console.log("SENTINEL IN");
+  console.log("=".repeat(80));
+});
+
 client.once("ready", () => {
-  console.log("✓ Sentinela Ativo");
+  console.log("=".repeat(80));
+  console.log("SENTINEL RUNNING");
+  console.log("=".repeat(80));
+});
+
+client.on("disconnected", (reason) => {
+  console.log("=".repeat(80));
+  console.warn("Cliente desconectado:", reason);
+  console.log("=".repeat(80));
+});
+
+client.on("auth_failure", (msg) => {
+  console.log("=".repeat(80));
+  console.error("Falha de autenticação:", msg);
+  console.log("=".repeat(80));
 });
 
 const generateHash = (text) => {
@@ -102,6 +122,7 @@ client.on("message", async (message) => {
     console.log(
       `[CAPTURADO] ${payload.author_name}: ${payload.message.substring(0, 50)}`,
     );
+    console.log("=".repeat(80));
   } catch (error) {
     console.error(error.message);
   }
