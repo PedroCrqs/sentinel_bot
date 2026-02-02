@@ -52,7 +52,7 @@ client.on("qr", (qr) => {
   qrcode.generate(qr, { small: true });
 });
 
-client.once("authenticated", () => {
+client.on("authenticated", () => {
   console.log("=".repeat(80));
   console.log("SENTINEL IN");
   console.log("=".repeat(80));

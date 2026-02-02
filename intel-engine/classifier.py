@@ -52,6 +52,9 @@ SELLING_SIGNALS = {
         ('de frente', 2),
         ('mobília:', 4),
         ('riserva golf', 2),
+        ('opcao', 2),
+        ('milhões', 4),
+        ('barramares', 4),
     ]
 }
 
@@ -59,11 +62,13 @@ BUYING_SIGNALS = {
     'strong': [
         ('preciso', 15),
         ('busco', 15),
+        ('busca', 15),
         ('procuro', 15),
         ('compro', 15),
         ('compra', 15),
         ('cliente procura', 20),
         ('cliente busca', 20),
+        ('cliente direto', 20),
         ('cliente precisa', 20),
         ('urgente', 10),
         ('ja esta visitando', 15),
@@ -80,6 +85,9 @@ BUYING_SIGNALS = {
         ('interessado', 6),
         ('frente:', 4),
         ('riserva golf', 2),
+        ('opcao', 2),
+        ('milhões', 4),
+        ('barramares', 4),
     ]
 }
 
@@ -283,10 +291,10 @@ def main() -> None:
         else:
             useless.append(UselessMessage(message_data))
     
-    print_statistics(sellers, buyers, useless, len(data))
+    # print_statistics(sellers, buyers, useless, len(data))
     # print_messages("🔴 MENSAGENS INÚTEIS:", useless)
-    # # print_messages("🔵 PEDIDOS DE COMPRA:", buyers)
-    # print_messages("🟢 ANÚNCIOS DE VENDA:", sellers)
+    # print_messages("🔵 PEDIDOS DE COMPRA:", buyers)
+    print_messages("🟢 ANÚNCIOS DE VENDA:", sellers)
 
 if __name__ == "__main__":
     main()
