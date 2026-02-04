@@ -1,6 +1,9 @@
 import re
+import spacy
 from typing import List, Dict, Any, Tuple
 from ingest import data
+
+nlp = spacy.load("pt_core_news_lg")
 
 SELLING_SIGNALS = {
     'strong': [
@@ -63,7 +66,10 @@ BUYING_SIGNALS = {
         ('preciso', 15),
         ('busco', 15),
         ('busca', 15),
+        ('buscando', 15),
         ('procuro', 15),
+        ('procurando', 15),
+        ('procura', 15),
         ('compro', 15),
         ('compra', 15),
         ('cliente procura', 20),
@@ -212,37 +218,55 @@ class Message:
         self.data = data_line
         self.author_name = data_line.get('author_name', 'Desconhecido')
         self.author_phone = data_line.get('author_phone', 'Desconhecido')
-        self.message = data_line.get('message', '')
+        self.raw_message = data_line.get('message', '')
+        self.normalized_message = normalize_text(self.raw_message)
+        self.doc = nlp(self.normalized_message)
+        self.type = ''
+
+    @property
+    def lemmas(self) -> List[str]:
+        return [token.lemma_ for token in self.doc if not token.is_stop]
+
+    @property
+    def entities(self):
+        return [(ent.text, ent.label_) for ent in self.doc.ents]
+
+    def classify(self) -> str:
+        sell_score, _ = calculate_selling_score(self.normalized_message)
+        buy_score, _ = calculate_buying_score(self.normalized_message)
+
+        if buy_score >= 15 and buy_score > sell_score:
+            self.type = 'COMPRA'
+        elif sell_score >= 20:
+            self.type = 'VENDA'
+        else:
+            self.type = 'INÚTIL'
+
+        return self.type
+
+    @property
+    def stats(self) -> Dict[str, str]:
+        return {
+            'corretor': self.author_name,
+            'telefone': self.author_phone,
+            'conteudo': self.raw_message,
+            'objetivo': self.type
+        }
 
 class SellingMessage(Message): 
-    @property
-    def stats(self) -> str:
-        return (
-            f"Corretor: {self.author_name}\n"
-            f"Telefone: {self.author_phone}\n"
-            f"Anúncio: {self.message}\n"
-            "Objetivo: Vender\n\n"
-        )
+    def __init__(self, data_line: Dict[str, Any]):
+        super().__init__(data_line)
+        self.type = 'VENDA'
 
 class BuyingMessage(Message):
-    @property
-    def stats(self) -> str:
-        return (
-            f"Corretor: {self.author_name}\n"
-            f"Telefone: {self.author_phone}\n"
-            f"Pedido: {self.message}\n"
-            "Objetivo: Comprar\n\n"
-        )
+    def __init__(self, data_line: Dict[str, Any]):
+        super().__init__(data_line)
+        self.type = 'COMPRA'
 
 class UselessMessage(Message):
-    @property
-    def stats(self) -> str:
-        return (
-            f"Corretor: {self.author_name}\n"
-            f"Telefone: {self.author_phone}\n"
-            f"Conteúdo: {self.message}\n"
-            "Objetivo: Unknown\n\n"
-        )
+    def __init__(self, data_line: Dict[str, Any]):
+        super().__init__(data_line)
+        self.type = 'INÚTIL'
 
 def print_statistics(sellers: List[SellingMessage], 
                     buyers: List[BuyingMessage],
@@ -267,7 +291,11 @@ def print_messages(title: str,
     display_count = len(messages) if max_display is None else min(max_display, len(messages))
     
     for message in messages[:display_count]:
-        print(message.stats)
+        stats_dict = message.stats
+        print(f"Corretor: {stats_dict['corretor']}")
+        print(f"Telefone: {stats_dict['telefone']}")
+        print(f"Conteúdo: {stats_dict['conteudo']}")
+        print(f"Objetivo: {stats_dict['objetivo']}\n")
     
     if max_display and len(messages) > max_display:
         print(f"... e mais {len(messages) - max_display} mensagens")
@@ -290,11 +318,16 @@ def main() -> None:
             buyers.append(BuyingMessage(message_data))
         else:
             useless.append(UselessMessage(message_data))
-    
+
     # print_statistics(sellers, buyers, useless, len(data))
     # print_messages("🔴 MENSAGENS INÚTEIS:", useless)
     # print_messages("🔵 PEDIDOS DE COMPRA:", buyers)
-    print_messages("🟢 ANÚNCIOS DE VENDA:", sellers)
+    # print_messages("🟢 ANÚNCIOS DE VENDA:", sellers)
+    return sellers, buyers, useless
+
+
+
+sellers, buyers, useless = main()
 
 if __name__ == "__main__":
     main()
