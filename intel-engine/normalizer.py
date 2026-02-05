@@ -12,7 +12,7 @@ PROPERTY_TYPE_MAP = {
     "APARTAMENTO": ["apartamento", "apto", "ap", "apt", "Apartamento"],
     "CASA": ["casa", "residencia", "residência", "Casa"],
     "TERRENO": ["terreno", "lote"],
-    "COBERTURA": ["cobertura", "Cobertura", "cob", "Cob", "COB"]
+    "COBERTURA": ["cobertura", "Cobertura", "cob", "Cob", "COB"],
 }
 
 NEIGHBORHOODS = [
@@ -30,7 +30,8 @@ NEIGHBORHOODS = [
     "anil",
     "pechincha",
     "itanhangá",
-    ]
+    "humaitá",
+]
 
 
 class NormalizedAd:
@@ -49,7 +50,7 @@ class NormalizedAd:
         text = text.lower()
         text = re.sub(r"\s+", " ", text)
         return text.strip()
-    
+
     def extract_property_type(self):
         for token in self.doc:
             lemma = token.lemma_
@@ -60,16 +61,20 @@ class NormalizedAd:
                     return self.property_type
 
         return None
-    
 
     def extract_price(self):
         prices = []
         text = self.raw_text.lower()
 
         forbidden_context = [
-            "condominio", "condomínio",
-            "iptu", "taxa",
-            "foro", "laudemio", "laudêmio"
+            "condominio",
+            "condomínio",
+            "cond",
+            "iptu",
+            "taxa",
+            "foro",
+            "laudemio",
+            "laudêmio",
         ]
 
         lines = text.splitlines()
@@ -95,13 +100,9 @@ class NormalizedAd:
             self.price = {"min": None, "max": None}
             return self.price
 
-        self.price = {
-            "min": min(prices),
-            "max": max(prices)
-        }
+        self.price = {"min": min(prices), "max": max(prices)}
         return self.price
 
-    
     def _parse_money(self, text: str):
         results = []
 
@@ -123,28 +124,65 @@ class NormalizedAd:
                     continue
 
         return results if results else None
-        
+
     def extract_bedrooms(self):
-        numbers = []
+        text_nums = {
+            "um": 1,
+            "uma": 1,
+            "dois": 2,
+            "duas": 2,
+            "tres": 3,
+            "três": 3,
+            "quatro": 4,
+            "cinco": 5,
+            "seis": 6,
+            "sete": 7,
+            "oito": 8,
+            "nove": 9,
+            "dez": 10,
+        }
+
+        bedroom_terms = {"quarto", "quartos", "qt", "qts"}
+        suite_terms = {"suite", "suites", "suíte", "suítes", "st", "sts"}
+
+        bedrooms = []
+        suites = []
 
         for i, token in enumerate(self.doc):
-            if token.like_num and token.text.isdigit():
-                window = self.doc[max(0, i-2): i+3]
+            value = None
 
-                for w in window:
-                    if w.lemma_ == "quarto":
-                        numbers.append(int(token.text))
-                        break
+            if token.like_num:
+                clean = re.sub(r"[^\d]", "", token.text)
+                if clean:
+                    value = int(clean)
+                else:
+                    value = text_nums.get(token.lemma_.lower())
 
-        if not numbers:
+            if value is None:
+                continue
+
+            window = self.doc[max(0, i - 3) : i + 4]
+
+            for w in window:
+                lemma = w.lemma_.lower()
+
+                if lemma in bedroom_terms:
+                    bedrooms.append(value)
+                    break
+
+                if lemma in suite_terms:
+                    suites.append(value)
+                    break
+
+        if bedrooms:
+            numbers = bedrooms
+        elif suites:
+            numbers = suites
+        else:
             self.bedrooms = {"min": None, "max": None}
             return self.bedrooms
 
-        self.bedrooms = {
-            "min": min(numbers),
-            "max": max(numbers)
-        }
-
+        self.bedrooms = {"min": min(numbers), "max": max(numbers)}
         return self.bedrooms
 
     def extract_neighborhood(self):
@@ -162,8 +200,7 @@ class NormalizedAd:
             r"(\d{2,4})\s*m²",
             r"(\d{2,4})\s*m2",
             r"(\d{2,4})\s*metros",
-            r"(\d{2,4})\s*metros quadrados"
-            r"(\d{2,4})\s*m"
+            r"(\d{2,4})\s*metros quadrados" r"(\d{2,4})\s*m",
         ]
 
         for pattern in patterns:
@@ -178,14 +215,9 @@ class NormalizedAd:
             self.area_m2 = {"min": None, "max": None}
             return self.area_m2
 
-        self.area_m2 = {
-            "min": min(areas),
-            "max": max(areas)
-        }
+        self.area_m2 = {"min": min(areas), "max": max(areas)}
         return self.area_m2
 
-
-   
     def normalize(self):
         self.extract_property_type()
         self.extract_price()
@@ -201,18 +233,21 @@ class NormalizedAd:
             "bedrooms": self.bedrooms,
             "raw_text": self.raw_text,
             "area_m2": self.area_m2,
-            # "original_content": self.original_content
-    }
+            # "original_content": self.original_content,
+        }
+
 
 for seller in sellers:
-    normalized_ad = NormalizedAd(seller.raw_message, 'sell', seller.data)
+    normalized_ad = NormalizedAd(seller.raw_message, "sell", seller.data)
     sellers_padronized.append(normalized_ad.normalize())
 
 for buyer in buyers:
-    normalized_ad = NormalizedAd(buyer.raw_message, 'buy', buyer.data)
-    buyers_padronized.append(normalized_ad.normalize())    
+    normalized_ad = NormalizedAd(buyer.raw_message, "buy", buyer.data)
+    buyers_padronized.append(normalized_ad.normalize())
 
-print(f'''
-        Buyers: {len(buyers_padronized)}
-        Sellers: {len(sellers_padronized)}''')
-print(sellers_padronized)
+# print(
+#     f"""
+#         Buyers: {len(buyers_padronized)}
+#         Sellers: {len(sellers_padronized)}"""
+# )
+# print(sellers_padronized)
