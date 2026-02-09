@@ -1,10 +1,9 @@
-from classifier import main
+from classifier import sellers, buyers, useless
 import re
 import spacy
 
 nlp = spacy.load("pt_core_news_lg")
 
-sellers, buyers, useless = main()
 sellers_padronized = []
 buyers_padronized = []
 
@@ -42,8 +41,9 @@ class NormalizedAd:
         self.doc = nlp(self.text)
         self.property_type = None
         self.neighborhood = []
-        self.price = {"min": None, "max": None}
-        self.bedrooms = {"min": None, "max": None}
+        self.price = None
+        self.bedrooms = None
+        self.area_m2 = None
         self.original_content = original_content
 
     def _normalize_text(self, text: str) -> str:
@@ -79,15 +79,48 @@ class NormalizedAd:
 
         lines = text.splitlines()
 
-        for line in lines:
+        for i, line in enumerate(lines):
             if any(word in line for word in forbidden_context):
                 continue
 
-            matches = re.findall(r"r\$\s*([\d\.]+,\d{2})", line)
+            if i > 0:
+                prev_line = lines[i - 1]
+                if any(word in prev_line for word in forbidden_context):
+                    continue
+
+            matches = re.findall(
+                r"r\$\s*([\d\.,]+)\s*(milh[oõ]es|milh[aã]o|mil|mi|k)?", line
+            )
             for m in matches:
-                value = m.replace(".", "").replace(",", ".")
+                num_str, suffix = m
                 try:
-                    prices.append(int(float(value)))
+                    if "," in num_str and "." in num_str:
+                        value = num_str.replace(".", "").replace(",", ".")
+                    elif "," in num_str:
+                        value = num_str.replace(",", ".")
+                    elif num_str.count(".") > 1:
+                        value = num_str.replace(".", "")
+                    elif "." in num_str and suffix:
+                        value = num_str
+                    elif "." in num_str and not suffix:
+                        value = num_str.replace(".", "")
+                    else:
+                        value = num_str
+
+                    base = float(value)
+
+                    multipliers = {
+                        "milhões": 1_000_000,
+                        "milhoes": 1_000_000,
+                        "milhão": 1_000_000,
+                        "milhao": 1_000_000,
+                        "mi": 1_000_000,
+                        "mil": 1_000,
+                        "k": 1_000,
+                    }
+
+                    multiplier = multipliers.get(suffix, 1)
+                    prices.append(int(base * multiplier))
                 except ValueError:
                     continue
 
@@ -97,21 +130,25 @@ class NormalizedAd:
                 prices.extend(informal)
 
         if not prices:
-            self.price = {"min": None, "max": None}
+            self.price = None
             return self.price
 
-        self.price = {"min": min(prices), "max": max(prices)}
+        if self.intent == "sell":
+            self.price = min(prices)
+        else:
+            self.price = max(prices)
+
         return self.price
 
     def _parse_money(self, text: str):
         results = []
 
         patterns = [
-            (r"(\d+(?:[\.,]\d+)?)\s*k", 1_000),
-            (r"(\d+(?:[\.,]\d+)?)\s*mil", 1_000),
-            (r"(\d+(?:[\.,]\d+)?)\s*mi", 1_000_000),
-            (r"(\d+(?:[\.,]\d+)?)\s*milh[aã]o", 1_000_000),
             (r"(\d+(?:[\.,]\d+)?)\s*milh[oõ]es", 1_000_000),
+            (r"(\d+(?:[\.,]\d+)?)\s*milh[aã]o", 1_000_000),
+            (r"(\d+(?:[\.,]\d+)?)\s*mi\b", 1_000_000),
+            (r"(\d+(?:[\.,]\d+)?)\s*mil\b", 1_000),
+            (r"(\d+(?:[\.,]\d+)?)\s*k\b", 1_000),
         ]
 
         for pattern, multiplier in patterns:
@@ -126,63 +163,82 @@ class NormalizedAd:
         return results if results else None
 
     def extract_bedrooms(self):
-        text_nums = {
-            "um": 1,
-            "uma": 1,
-            "dois": 2,
-            "duas": 2,
-            "tres": 3,
-            "três": 3,
-            "quatro": 4,
-            "cinco": 5,
-            "seis": 6,
-            "sete": 7,
-            "oito": 8,
-            "nove": 9,
-            "dez": 10,
-        }
-
-        bedroom_terms = {"quarto", "quartos", "qt", "qts"}
-        suite_terms = {"suite", "suites", "suíte", "suítes", "st", "sts"}
-
+        text = self.raw_text.lower()
         bedrooms = []
-        suites = []
 
-        for i, token in enumerate(self.doc):
-            value = None
+        direct_patterns = [
+            r"quartos?\s*:?\s*(\d+)",
+            r"(\d+)\s*quartos?",
+            r"qts?\s*:?\s*(\d+)",
+            r"(\d+)\s*qts?",
+        ]
 
-            if token.like_num:
-                clean = re.sub(r"[^\d]", "", token.text)
-                if clean:
-                    value = int(clean)
+        for pattern in direct_patterns:
+            matches = re.findall(pattern, text)
+            for m in matches:
+                try:
+                    bedrooms.append(int(m))
+                except ValueError:
+                    continue
+
+        if not bedrooms:
+            suite_patterns = [
+                r"suites?\s*:?\s*(\d+)",
+                r"(\d+)\s*suites?",
+                r"suítes?\s*:?\s*(\d+)",
+                r"(\d+)\s*suítes?",
+            ]
+
+            for pattern in suite_patterns:
+                matches = re.findall(pattern, text)
+                for m in matches:
+                    try:
+                        bedrooms.append(int(m))
+                    except ValueError:
+                        continue
+
+        if not bedrooms:
+            text_nums = {
+                "um": 1,
+                "uma": 1,
+                "dois": 2,
+                "duas": 2,
+                "tres": 3,
+                "três": 3,
+                "quatro": 4,
+                "cinco": 5,
+            }
+
+            bedroom_terms = {"quarto", "quartos", "qt", "qts"}
+            suite_terms = {"suite", "suites", "suíte", "suítes"}
+
+            for i, token in enumerate(self.doc):
+                value = None
+
+                if token.like_num:
+                    clean = re.sub(r"[^\d]", "", token.text)
+                    if clean:
+                        value = int(clean)
                 else:
                     value = text_nums.get(token.lemma_.lower())
 
-            if value is None:
-                continue
+                if value is None or value > 20:
+                    continue
 
-            window = self.doc[max(0, i - 3) : i + 4]
+                window = self.doc[max(0, i - 3) : i + 4]
 
-            for w in window:
-                lemma = w.lemma_.lower()
+                for w in window:
+                    lemma = w.lemma_.lower()
 
-                if lemma in bedroom_terms:
-                    bedrooms.append(value)
-                    break
+                    if lemma in bedroom_terms or lemma in suite_terms:
+                        bedrooms.append(value)
+                        break
 
-                if lemma in suite_terms:
-                    suites.append(value)
-                    break
-
-        if bedrooms:
-            numbers = bedrooms
-        elif suites:
-            numbers = suites
-        else:
-            self.bedrooms = {"min": None, "max": None}
+        if not bedrooms:
+            self.bedrooms = None
             return self.bedrooms
 
-        self.bedrooms = {"min": min(numbers), "max": max(numbers)}
+        self.bedrooms = max(bedrooms)
         return self.bedrooms
 
     def extract_neighborhood(self):
@@ -199,8 +255,7 @@ class NormalizedAd:
         patterns = [
             r"(\d{2,4})\s*m²",
             r"(\d{2,4})\s*m2",
-            r"(\d{2,4})\s*metros",
-            r"(\d{2,4})\s*metros quadrados" r"(\d{2,4})\s*m",
+            r"(\d{2,4})\s*metros\s*quadrados",
         ]
 
         for pattern in patterns:
@@ -212,10 +267,14 @@ class NormalizedAd:
                     continue
 
         if not areas:
-            self.area_m2 = {"min": None, "max": None}
+            self.area_m2 = None
             return self.area_m2
 
-        self.area_m2 = {"min": min(areas), "max": max(areas)}
+        if self.intent == "sell":
+            self.area_m2 = max(areas)
+        else:
+            self.area_m2 = min(areas)
+
         return self.area_m2
 
     def normalize(self):
@@ -233,7 +292,7 @@ class NormalizedAd:
             "bedrooms": self.bedrooms,
             "raw_text": self.raw_text,
             "area_m2": self.area_m2,
-            # "original_content": self.original_content,
+            "original_content": self.original_content,
         }
 
 
@@ -244,10 +303,3 @@ for seller in sellers:
 for buyer in buyers:
     normalized_ad = NormalizedAd(buyer.raw_message, "buy", buyer.data)
     buyers_padronized.append(normalized_ad.normalize())
-
-# print(
-#     f"""
-#         Buyers: {len(buyers_padronized)}
-#         Sellers: {len(sellers_padronized)}"""
-# )
-# print(sellers_padronized)

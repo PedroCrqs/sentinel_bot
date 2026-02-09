@@ -1,71 +1,103 @@
 from normalizer import buyers_padronized, sellers_padronized
 
-
-opportunities = []
-
 OPPORTUNITY_SIGNALS = {
     "neighborhood": 10,
     "price": 10,
     "property_type": 5,
-    "bedrooms": 5,
     "area_m2": 5,
+    "bedrooms": 5,
 }
 
 
-def range_match(a, b):
-    if not a or not b:
+def neighborhood_match(buyer_neighborhoods, seller_neighborhoods):
+    if not buyer_neighborhoods or not seller_neighborhoods:
         return False
-
-    if a.get("min") is None or b.get("min") is None:
+    if not isinstance(buyer_neighborhoods, list) or not isinstance(
+        seller_neighborhoods, list
+    ):
         return False
+    return len(set(buyer_neighborhoods) & set(seller_neighborhoods)) > 0
 
-    return not (a["max"] < b["min"] or b["max"] < a["min"])
 
-
-def neighborhood_match(a, b):
-    if not a or not b:
+def price_match(buyer_price, seller_price):
+    if buyer_price is None or seller_price is None:
         return False
+    return seller_price <= buyer_price
 
-    if not isinstance(a, list) or not isinstance(b, list):
+
+def bedrooms_match(buyer_bedrooms, seller_bedrooms):
+    if buyer_bedrooms is None or seller_bedrooms is None:
         return False
+    return seller_bedrooms >= buyer_bedrooms
 
-    return len(set(a) & set(b)) > 0
+
+def area_match(buyer_area, seller_area):
+    if buyer_area is None or seller_area is None:
+        return False
+    return seller_area >= buyer_area
 
 
 def get_opportunity():
+    opportunities = []
+    seen_pairs = set()
 
     for buyer in buyers_padronized:
         for seller in sellers_padronized:
 
+            buyer_id = buyer["original_content"]["message_id"]
+            seller_id = seller["original_content"]["message_id"]
+
+            pair_key = (buyer_id, seller_id)
+
+            if pair_key in seen_pairs:
+                continue
+
+            seen_pairs.add(pair_key)
+
             score = 0
 
-            if neighborhood_match(
+            if not neighborhood_match(
                 buyer.get("neighborhood"), seller.get("neighborhood")
             ):
-                score += OPPORTUNITY_SIGNALS["neighborhood"]
+                continue
 
-            if range_match(buyer.get("price"), seller.get("price")):
-                score += OPPORTUNITY_SIGNALS["price"]
+            score += OPPORTUNITY_SIGNALS["neighborhood"]
 
-            if (
-                buyer.get("property_type") is not None
-                and seller.get("property_type") is not None
-                and buyer["property_type"] == seller["property_type"]
-            ):
+            if not price_match(buyer.get("price"), seller.get("price")):
+                continue
+
+            score += OPPORTUNITY_SIGNALS["price"]
+
+            if not bedrooms_match(buyer.get("bedrooms"), seller.get("bedrooms")):
+                continue
+
+            score += OPPORTUNITY_SIGNALS["bedrooms"]
+
+            if buyer.get("property_type") == seller.get("property_type"):
                 score += OPPORTUNITY_SIGNALS["property_type"]
 
-            if range_match(buyer.get("bedrooms"), seller.get("bedrooms")):
-                score += OPPORTUNITY_SIGNALS["bedrooms"]
-            else:
-                score -= 20
-
-            if range_match(buyer.get("area_m2"), seller.get("area_m2")):
+            if area_match(buyer.get("area_m2"), seller.get("area_m2")):
                 score += OPPORTUNITY_SIGNALS["area_m2"]
 
-            if score > 20:
-                opportunities.append({"buyer": buyer, "seller": seller, "score": score})
+            opportunities.append({"buyer": buyer, "seller": seller, "score": score})
 
-    print(opportunities)
+    return opportunities
 
 
-get_opportunity()
+opportunities = get_opportunity()
+for opp in opportunities:
+    print(f"\n{'='*80}")
+    print(f"SCORE: {opp['score']}")
+    print(f"\nCOMPRADOR:")
+    print(f"  Mensagem: {opp['buyer']['raw_text']}...")
+    print(f"  Bairro: {opp['buyer']['neighborhood']}")
+    print(f"  Preço máx: {opp['buyer']['price']}")
+    print(f"  Quartos mín: {opp['buyer']['bedrooms']}")
+    print(f"  Área mín: {opp['buyer']['area_m2']}")
+    print(f"\nVENDEDOR:")
+    print(f"  Mensagem: {opp['seller']['raw_text']}...")
+    print(f"  Bairro: {opp['seller']['neighborhood']}")
+    print(f"  Preço: {opp['seller']['price']}")
+    print(f"  Quartos: {opp['seller']['bedrooms']}")
+    print(f"  Área: {opp['seller']['area_m2']}")
+    print(f"{'='*80}")
