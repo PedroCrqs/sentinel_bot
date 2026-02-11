@@ -1,4 +1,3 @@
-from classifier import sellers, buyers, useless
 import re
 import spacy
 
@@ -296,10 +295,13 @@ class NormalizedAd:
         }
 
 
-for seller in sellers:
-    normalized_ad = NormalizedAd(seller.raw_message, "sell", seller.data)
-    sellers_padronized.append(normalized_ad.normalize())
+def run_normalizer(sellers, buyers):
+    for seller in sellers:
+        normalized_ad = NormalizedAd(seller.raw_message, "sell", seller.data)
+        sellers_padronized.append(normalized_ad.normalize())
 
-for buyer in buyers:
-    normalized_ad = NormalizedAd(buyer.raw_message, "buy", buyer.data)
-    buyers_padronized.append(normalized_ad.normalize())
+    for buyer in buyers:
+        normalized_ad = NormalizedAd(buyer.raw_message, "buy", buyer.data)
+        buyers_padronized.append(normalized_ad.normalize())
+
+    return sellers_padronized, buyers_padronized

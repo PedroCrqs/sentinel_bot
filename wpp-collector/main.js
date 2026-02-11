@@ -5,7 +5,7 @@ const path = require("path");
 const crypto = require("crypto");
 
 const SESSION_PATH = path.join(__dirname, "session");
-const OUTPUT_FILE = path.join(__dirname, "messages.jsonl");
+const OUTPUT_FILE = path.join(__dirname, "../data/messages.jsonl");
 const DEDUP_WINDOW = 7776000;
 
 const knownIds = new Set();
@@ -19,12 +19,11 @@ if (fs.existsSync(OUTPUT_FILE)) {
         const parsed = JSON.parse(line);
         knownIds.add(parsed.message_id);
         if (parsed.ad_hash) {
-          const key = `${parsed.author_id}_${parsed.ad_hash}`;
           if (
-            !lastSeenAds.has(key) ||
-            parsed.timestamp > lastSeenAds.get(key)
+            !lastSeenAds.has(parsed.ad_hash) ||
+            parsed.timestamp > lastSeenAds.get(parsed.ad_hash)
           ) {
-            lastSeenAds.set(key, parsed.timestamp);
+            lastSeenAds.set(parsed.ad_hash, parsed.timestamp);
           }
         }
       } catch (e) {}
@@ -66,13 +65,13 @@ client.once("ready", () => {
 
 client.on("disconnected", (reason) => {
   console.log("=".repeat(80));
-  console.warn("Cliente desconectado:", reason);
+  console.warn("DISCONECTED:", reason);
   console.log("=".repeat(80));
 });
 
 client.on("auth_failure", (msg) => {
   console.log("=".repeat(80));
-  console.error("Falha de autenticação:", msg);
+  console.error("AUTH FAILURE:", msg);
   console.log("=".repeat(80));
 });
 
@@ -92,11 +91,10 @@ client.on("message", async (message) => {
 
     const authorId = message.author || message.from;
     const adHash = generateHash(message.body);
-    const adKey = `${authorId}_${adHash}`;
     const now = Math.floor(Date.now() / 1000);
 
-    if (lastSeenAds.has(adKey)) {
-      const lastTimestamp = lastSeenAds.get(adKey);
+    if (lastSeenAds.has(adHash)) {
+      const lastTimestamp = lastSeenAds.get(adHash);
       if (now - lastTimestamp < DEDUP_WINDOW) return;
     }
 
@@ -117,7 +115,7 @@ client.on("message", async (message) => {
       encoding: "utf-8",
     });
     knownIds.add(payload.message_id);
-    lastSeenAds.set(adKey, payload.timestamp);
+    lastSeenAds.set(adHash, payload.timestamp);
 
     console.log(
       `[CAPTURADO] ${payload.author_name}: ${payload.message.substring(0, 50)}`,

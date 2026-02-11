@@ -1,5 +1,3 @@
-from normalizer import buyers_padronized, sellers_padronized
-
 OPPORTUNITY_SIGNALS = {
     "neighborhood": 10,
     "price": 10,
@@ -37,7 +35,7 @@ def area_match(buyer_area, seller_area):
     return seller_area >= buyer_area
 
 
-def get_opportunity():
+def get_opportunity(sellers_padronized, buyers_padronized):
     opportunities = []
     seen_pairs = set()
 
@@ -84,20 +82,20 @@ def get_opportunity():
     return opportunities
 
 
-opportunities = get_opportunity()
-for opp in opportunities:
-    print(f"\n{'='*80}")
-    print(f"SCORE: {opp['score']}")
-    print(f"\nCOMPRADOR:")
-    print(f"  Mensagem: {opp['buyer']['raw_text']}...")
-    print(f"  Bairro: {opp['buyer']['neighborhood']}")
-    print(f"  Preço máx: {opp['buyer']['price']}")
-    print(f"  Quartos mín: {opp['buyer']['bedrooms']}")
-    print(f"  Área mín: {opp['buyer']['area_m2']}")
-    print(f"\nVENDEDOR:")
-    print(f"  Mensagem: {opp['seller']['raw_text']}...")
-    print(f"  Bairro: {opp['seller']['neighborhood']}")
-    print(f"  Preço: {opp['seller']['price']}")
-    print(f"  Quartos: {opp['seller']['bedrooms']}")
-    print(f"  Área: {opp['seller']['area_m2']}")
-    print(f"{'='*80}")
+# opportunities = get_opportunity()
+# for opp in opportunities:
+#     print(f"\n{'='*80}")
+#     print(f"SCORE: {opp['score']}")
+#     print(f"\nCOMPRADOR:")
+#     print(f"  Mensagem: {opp['buyer']['raw_text']}...")
+#     print(f"  Bairro: {opp['buyer']['neighborhood']}")
+#     print(f"  Preço máx: {opp['buyer']['price']}")
+#     print(f"  Quartos mín: {opp['buyer']['bedrooms']}")
+#     print(f"  Área mín: {opp['buyer']['area_m2']}")
+#     print(f"\nVENDEDOR:")
+#     print(f"  Mensagem: {opp['seller']['raw_text']}...")
+#     print(f"  Bairro: {opp['seller']['neighborhood']}")
+#     print(f"  Preço: {opp['seller']['price']}")
+#     print(f"  Quartos: {opp['seller']['bedrooms']}")
+#     print(f"  Área: {opp['seller']['area_m2']}")
+#     print(f"{'='*80}")

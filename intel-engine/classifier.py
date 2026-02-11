@@ -1,7 +1,6 @@
 import re
 import spacy
 from typing import List, Dict, Any, Tuple
-from ingest import data
 
 nlp = spacy.load("pt_core_news_lg")
 
@@ -332,7 +331,7 @@ def print_messages(
         print(f"... e mais {len(messages) - max_display} mensagens")
 
 
-def main() -> None:
+def run_classifier(data) -> None:
     if not data:
         print("Nenhuma mensagem carregada. Encerrando.")
         return
@@ -355,10 +354,4 @@ def main() -> None:
     # print_messages("🔴 MENSAGENS INÚTEIS:", useless)
     # print_messages("🔵 PEDIDOS DE COMPRA:", buyers)
     # print_messages("🟢 ANÚNCIOS DE VENDA:", sellers)
-    return sellers, buyers, useless
-
-
-sellers, buyers, useless = main()
-
-if __name__ == "__main__":
-    main()
+    return sellers, buyers
