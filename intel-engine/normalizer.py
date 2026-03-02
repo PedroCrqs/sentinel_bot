@@ -29,6 +29,7 @@ NEIGHBORHOODS = [
     "pechincha",
     "itanhangá",
     "humaitá",
+    "barra bonita",
 ]
 
 
