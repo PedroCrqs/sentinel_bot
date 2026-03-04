@@ -4,6 +4,7 @@ OPPORTUNITY_SIGNALS = {
     "property_type": 5,
     "area_m2": 5,
     "bedrooms": 5,
+    "condominium": 15,  # Highest signal: explicit condominium match
 }
 
 
@@ -33,6 +34,13 @@ def area_match(buyer_area, seller_area):
     if buyer_area is None or seller_area is None:
         return False
     return seller_area >= buyer_area
+
+
+def condominium_match(buyer_condominium, seller_condominium):
+    """Returns True if both sides mention the same condominium (case-insensitive)."""
+    if not buyer_condominium or not seller_condominium:
+        return False
+    return buyer_condominium.lower() == seller_condominium.lower()
 
 
 def get_opportunity(sellers_padronized, buyers_padronized):
@@ -77,9 +85,18 @@ def get_opportunity(sellers_padronized, buyers_padronized):
             if area_match(buyer.get("area_m2"), seller.get("area_m2")):
                 score += OPPORTUNITY_SIGNALS["area_m2"]
 
+            buyer_cond = buyer.get("condominium")
+            seller_cond = seller.get("condominium")
+            if buyer_cond:
+                if not condominium_match(buyer_cond, seller_cond):
+                    continue
+                score += OPPORTUNITY_SIGNALS["condominium"]
+            elif seller_cond:
+                score += OPPORTUNITY_SIGNALS["condominium"] // 2
+
             opportunities.append({"buyer": buyer, "seller": seller, "score": score})
 
-    return opportunities
+    return sorted(opportunities, key=lambda x: x["score"], reverse=True)
 
 
 # opportunities = get_opportunity()

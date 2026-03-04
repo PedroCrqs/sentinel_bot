@@ -30,8 +30,104 @@ NEIGHBORHOODS = [
     "itanhangá",
     "humaitá",
     "barra bonita",
+    "pontal oceanico",
 ]
 
+CONDOMINIUM = [
+  "Acqua Marine",
+  "Alameda dos Jequitibás",
+  "Alfa Barra",
+  "Aloha",
+  "Alphaville",
+  "Alto Leblon",
+  "Americas Park",
+  "Art Life",
+  "Atlântico Golf",
+  "Atlântico Sul",
+  "Barra Bali",
+  "Barra Central Park",
+  "Barramares",
+  "Barra Summer Dreams",
+  "Barra Sunday",
+  "Península",
+  "Beauclair",
+  "Blue House",
+  "Blue Vision",
+  "Bora Bora Resort",
+  "Bosque da Freguesia",
+  "Bosque dos Esquilos",
+  "Bothanica Nature",
+  "Califórnia Coast",
+  "Casa Alta",
+  "Duet",
+  "Duo Residenziale",
+  "Estrelas",
+  "Floresta Park",
+  "Fontano",
+  "Four Seasons",
+  "Freedom",
+  "Grand Prix",
+  "Green Park",
+  "Green Place",
+  "Icono Parque",
+  "Itaúna Gold",
+  "Jardim Interlagos",
+  "Jardins",
+  "Joia da Barra",
+  "Le Monde",
+  "Le Parc",
+  "Liberty Green",
+  "Libertá",
+  "Life Resort",
+  "Liv Lifestyle",
+  "Luar do Pontal",
+  "Lume Barra Bonita",
+  "Lume Residencial",
+  "Maayan",
+  "Malibu",
+  "Mandala",
+  "Maramar",
+  "Marina Costabella",
+  "Mediterrâneo",
+  "MORADA DO SOL",
+  "MUDRA",
+  "Next",
+  "Niemeyer",
+  "Nova Barra",
+  "Nova Ipanema",
+  "Nova Sernambetiba",
+  "Novo Leblon",
+  "Ocean Breeze",
+  "Origami",
+  "Palais",
+  "Palm Springs",
+  "Park Premium",
+  "Pedra de Itaúna",
+  "Península Saint Martin",
+  "Península Way",
+  "Planície",
+  "Playa",
+  "Portal do Parque",
+  "Príncipe de Mônaco",
+  "Recanto das Garças",
+  "Recanto do Pontal",
+  "Reserva Jardim",
+  "Rio Mar",
+  "Riserva Golf",
+  "Riviera Del Sol",
+  "Royal Green",
+  "Santa Marina",
+  "Santa Mônica Special",
+  "Sublime Max",
+  "Sunset",
+  "Terra Nossa",
+  "Terrazas",
+  "Varandas",
+  "Verano",
+  "Villa Blanca",
+  "Villas da Barra",
+  "Viverde",
+  "Wonderful"]
 
 class NormalizedAd:
     def __init__(self, raw_text: str, intent: str, original_content):
@@ -45,6 +141,7 @@ class NormalizedAd:
         self.bedrooms = None
         self.area_m2 = None
         self.original_content = original_content
+        self.condominium = None
 
     def _normalize_text(self, text: str) -> str:
         text = text.lower()
@@ -248,6 +345,14 @@ class NormalizedAd:
 
         return self.neighborhood
 
+    def extract_condominium(self):
+        text_lower = self.raw_text.lower()
+        for cond in sorted(CONDOMINIUM, key=len, reverse=True):
+            if cond.lower() in text_lower:
+                self.condominium = cond
+                return self.condominium
+        return None
+
     def extract_area(self):
         text = self.raw_text.lower()
         areas = []
@@ -283,6 +388,7 @@ class NormalizedAd:
         self.extract_bedrooms()
         self.extract_neighborhood()
         self.extract_area()
+        self.extract_condominium()
 
         return {
             "intent": self.intent,
@@ -292,6 +398,7 @@ class NormalizedAd:
             "bedrooms": self.bedrooms,
             "raw_text": self.raw_text,
             "area_m2": self.area_m2,
+            "condominium": self.condominium,
             "original_content": self.original_content,
         }
 

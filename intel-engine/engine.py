@@ -37,7 +37,7 @@ while True:
 
         messages = [json.loads(l) for l in new_lines]
 
-        sellers, buyers = run_classifier(messages)
+        sellers, buyers, useless = run_classifier(messages)
         sellers_pad, buyers_pad = run_normalizer(sellers, buyers)
         opportunities = get_opportunity(sellers_pad, buyers_pad)
 
@@ -55,14 +55,17 @@ while True:
 
 # messages = []
 
-# with open("data/messages.jsonl", encoding="utf-8") as f:
+# with open("../data/messages.jsonl", encoding="utf-8") as f:
 #     lines = f.readlines()
 
 # messages = [json.loads(l) for l in lines]
 
-# sellers, buyers = run_classifier(messages)
+# sellers, buyers, useless = run_classifier(messages)
 # sellers_pad, buyers_pad = run_normalizer(sellers, buyers)
 # opportunities = get_opportunity(sellers_pad, buyers_pad)
+
+# for u in useless:
+#     print(f"{u.data['message']}\n")
 
 # for opp in opportunities:
 #     print(f"\n{'='*80}")

@@ -76,10 +76,16 @@ BUYING_SIGNALS = {
         ("cliente busca", 20),
         ("cliente direto", 20),
         ("cliente precisa", 20),
+        ("cliente interessada", 20),
+        ("cliente interessado", 20),
+        ("cliente querendo", 20),
         ("urgente", 10),
         ("ja esta visitando", 15),
-        ("alguem tem", 15),
+        ("alguém tem", 15),
+        ("alguém vende", 15),
         ("quem tem", 15),
+        ("quem tiver", 15),
+        ("estuda proposta", 15),
         ("quem teria", 15),
         ("tem opcao", 12),
         ("com opcao", 12),
@@ -350,8 +356,4 @@ def run_classifier(data) -> None:
         else:
             useless.append(UselessMessage(message_data))
 
-    # print_statistics(sellers, buyers, useless, len(data))
-    # print_messages("🔴 MENSAGENS INÚTEIS:", useless)
-    # print_messages("🔵 PEDIDOS DE COMPRA:", buyers)
-    # print_messages("🟢 ANÚNCIOS DE VENDA:", sellers)
-    return sellers, buyers
+    return sellers, buyers, useless
