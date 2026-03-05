@@ -31,6 +31,7 @@ NEIGHBORHOODS = [
     "humaitá",
     "barra bonita",
     "pontal oceanico",
+    "barra olimpica",
 ]
 
 CONDOMINIUM = [
@@ -66,6 +67,9 @@ CONDOMINIUM = [
   "Fontano",
   "Four Seasons",
   "Freedom",
+  "Gleba A", 
+  "Gleba B", 
+  "Gleba C",
   "Grand Prix",
   "Green Park",
   "Green Place",
@@ -103,8 +107,7 @@ CONDOMINIUM = [
   "Palm Springs",
   "Park Premium",
   "Pedra de Itaúna",
-  "Península Saint Martin",
-  "Península Way",
+  "Península",
   "Planície",
   "Playa",
   "Portal do Parque",
@@ -142,6 +145,7 @@ class NormalizedAd:
         self.area_m2 = None
         self.original_content = original_content
         self.condominium = None
+        self.beachfront = False
 
     def _normalize_text(self, text: str) -> str:
         text = text.lower()
@@ -347,11 +351,24 @@ class NormalizedAd:
 
     def extract_condominium(self):
         text_lower = self.raw_text.lower()
-        for cond in sorted(CONDOMINIUM, key=len, reverse=True):
-            if cond.lower() in text_lower:
-                self.condominium = cond
-                return self.condominium
-        return None
+        if self.intent == "buy":
+            found = []
+            for cond in sorted(CONDOMINIUM, key=len, reverse=True):
+                if cond.lower() in text_lower:
+                    found.append(cond)
+            self.condominium = found if found else None
+        else:
+            for cond in sorted(CONDOMINIUM, key=len, reverse=True):
+                if cond.lower() in text_lower:
+                    self.condominium = cond
+                    return self.condominium
+        return self.condominium
+
+    def extract_beachfront(self):
+        text_lower = self.raw_text.lower()
+        keywords = ["praia", "lúcio costa", "lucio costa"]
+        self.beachfront = any(kw in text_lower for kw in keywords)
+        return self.beachfront
 
     def extract_area(self):
         text = self.raw_text.lower()
@@ -389,6 +406,7 @@ class NormalizedAd:
         self.extract_neighborhood()
         self.extract_area()
         self.extract_condominium()
+        self.extract_beachfront()
 
         return {
             "intent": self.intent,
@@ -399,6 +417,7 @@ class NormalizedAd:
             "raw_text": self.raw_text,
             "area_m2": self.area_m2,
             "condominium": self.condominium,
+            "beachfront": self.beachfront,
             "original_content": self.original_content,
         }
 

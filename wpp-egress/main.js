@@ -116,6 +116,14 @@ function format(o) {
     return neighborhoods.join(", ");
   };
 
+  const formatCondominium = (condominium) => {
+    if (!condominium) return null;
+    if (Array.isArray(condominium)) {
+      return condominium.length > 0 ? condominium.join(", ") : null;
+    }
+    return condominium;
+  };
+
   let message = `🔥 *OPORTUNIDADE* | Score: ${o.score}\n`;
   message += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n`;
 
@@ -132,6 +140,10 @@ function format(o) {
   if (buyerDetails.length > 0) {
     message += `🏠 ${buyerDetails.join(" • ")}\n`;
   }
+
+  const buyerCond = formatCondominium(o.buyer.condominium);
+  if (buyerCond) message += `🏘️ Cond: ${buyerCond}\n`;
+  if (o.buyer.beachfront) message += `🌊 Próximo à praia\n`;
 
   message += `\nTexto original:\n_${o.buyer.raw_text}_\n`;
 
@@ -150,6 +162,10 @@ function format(o) {
   if (sellerDetails.length > 0) {
     message += `🏠 ${sellerDetails.join(" • ")}\n`;
   }
+
+  const sellerCond = formatCondominium(o.seller.condominium);
+  if (sellerCond) message += `🏘️ Cond: ${sellerCond}\n`;
+  if (o.seller.beachfront) message += `🌊 Próximo à praia\n`;
 
   message += `\nTexto original:\n_${o.seller.raw_text}_`;
 

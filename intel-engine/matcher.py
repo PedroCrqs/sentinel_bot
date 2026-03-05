@@ -4,7 +4,8 @@ OPPORTUNITY_SIGNALS = {
     "property_type": 5,
     "area_m2": 5,
     "bedrooms": 5,
-    "condominium": 15,  # Highest signal: explicit condominium match
+    "condominium": 15,
+    "beachfront": 10,
 }
 
 
@@ -21,7 +22,9 @@ def neighborhood_match(buyer_neighborhoods, seller_neighborhoods):
 def price_match(buyer_price, seller_price):
     if buyer_price is None or seller_price is None:
         return False
-    return seller_price <= buyer_price
+    upper_limit = buyer_price + 50_000
+    lower_limit = buyer_price * 0.80
+    return lower_limit <= seller_price <= upper_limit
 
 
 def bedrooms_match(buyer_bedrooms, seller_bedrooms):
@@ -36,11 +39,19 @@ def area_match(buyer_area, seller_area):
     return seller_area >= buyer_area
 
 
+def beachfront_match(buyer_beachfront, seller_beachfront):
+    if buyer_beachfront and not seller_beachfront:
+        return False
+    return True
+
+
 def condominium_match(buyer_condominium, seller_condominium):
-    """Returns True if both sides mention the same condominium (case-insensitive)."""
     if not buyer_condominium or not seller_condominium:
         return False
-    return buyer_condominium.lower() == seller_condominium.lower()
+    seller_lower = seller_condominium.lower()
+    if isinstance(buyer_condominium, list):
+        return any(cond.lower() == seller_lower for cond in buyer_condominium)
+    return buyer_condominium.lower() == seller_lower
 
 
 def get_opportunity(sellers_padronized, buyers_padronized):
@@ -87,6 +98,14 @@ def get_opportunity(sellers_padronized, buyers_padronized):
 
             buyer_cond = buyer.get("condominium")
             seller_cond = seller.get("condominium")
+
+            buyer_beachfront = buyer.get("beachfront", False)
+            seller_beachfront = seller.get("beachfront", False)
+            if not beachfront_match(buyer_beachfront, seller_beachfront):
+                score = 0
+                continue
+            if buyer_beachfront and seller_beachfront:
+                score += OPPORTUNITY_SIGNALS["beachfront"]
             if buyer_cond:
                 if not condominium_match(buyer_cond, seller_cond):
                     continue

@@ -109,6 +109,8 @@ USELESS_PATTERNS = [
     r"^\w+\.(pdf|jpg|jpeg|png|doc|docx)\s*$",
 ]
 
+RENTAL_KEYWORDS = ["locacao", "locação", "aluguel", "aluga", "alugar"]
+
 
 def normalize_text(text: str) -> str:
     text = text.lower()
@@ -204,6 +206,9 @@ def classify_message(message_data: Dict[str, Any], debug: bool = False) -> str:
         return "useless"
 
     normalized = normalize_text(message)
+
+    if any(kw in normalized for kw in RENTAL_KEYWORDS):
+        return "useless"
 
     for pattern in USELESS_PATTERNS:
         if re.match(pattern, normalized.strip()):
