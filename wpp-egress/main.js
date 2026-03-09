@@ -143,7 +143,7 @@ function format(o) {
 
   const buyerCond = formatCondominium(o.buyer.condominium);
   if (buyerCond) message += `🏘️ Cond: ${buyerCond}\n`;
-  if (o.buyer.beachfront) message += `🌊 Próximo à praia\n`;
+  if (o.buyer.nearbeach) message += `🌊 Próximo à praia\n`;
 
   message += `\nTexto original:\n_${o.buyer.raw_text}_\n`;
 
@@ -165,7 +165,7 @@ function format(o) {
 
   const sellerCond = formatCondominium(o.seller.condominium);
   if (sellerCond) message += `🏘️ Cond: ${sellerCond}\n`;
-  if (o.seller.beachfront) message += `🌊 Próximo à praia\n`;
+  if (o.seller.nearbeach) message += `🌊 Próximo à praia\n`;
 
   message += `\nTexto original:\n_${o.seller.raw_text}_`;
 

@@ -5,7 +5,7 @@ OPPORTUNITY_SIGNALS = {
     "area_m2": 5,
     "bedrooms": 5,
     "condominium": 15,
-    "beachfront": 10,
+    "nearbeach": 10,
 }
 
 
@@ -39,8 +39,8 @@ def area_match(buyer_area, seller_area):
     return seller_area >= buyer_area
 
 
-def beachfront_match(buyer_beachfront, seller_beachfront):
-    if buyer_beachfront and not seller_beachfront:
+def nearbeach_match(buyer_nearbeach, seller_nearbeach):
+    if buyer_nearbeach and not seller_nearbeach:
         return False
     return True
 
@@ -99,13 +99,13 @@ def get_opportunity(sellers_padronized, buyers_padronized):
             buyer_cond = buyer.get("condominium")
             seller_cond = seller.get("condominium")
 
-            buyer_beachfront = buyer.get("beachfront", False)
-            seller_beachfront = seller.get("beachfront", False)
-            if not beachfront_match(buyer_beachfront, seller_beachfront):
+            buyer_nearbeach = buyer.get("nearbeach", False)
+            seller_nearbeach = seller.get("nearbeach", False)
+            if not nearbeach_match(buyer_nearbeach, seller_nearbeach):
                 score = 0
                 continue
-            if buyer_beachfront and seller_beachfront:
-                score += OPPORTUNITY_SIGNALS["beachfront"]
+            if buyer_nearbeach and seller_nearbeach:
+                score += OPPORTUNITY_SIGNALS["nearbeach"]
             if buyer_cond:
                 if not condominium_match(buyer_cond, seller_cond):
                     continue
