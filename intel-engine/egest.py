@@ -1,5 +1,6 @@
 import json
 import hashlib
+import time
 
 
 def make_id(opp):
@@ -14,4 +15,5 @@ def export_opportunities(opportunities):
     with open("../data/opportunities.jsonl", "a", encoding="utf-8") as f:
         for opp in opportunities:
             opp["id"] = make_id(opp)
+            opp["timestamp"] = int(time.time())
             f.write(json.dumps(opp, ensure_ascii=False) + "\n")
