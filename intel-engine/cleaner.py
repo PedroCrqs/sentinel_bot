@@ -9,7 +9,6 @@ OPPORTUNITIES_FILE = "../data/opportunities.jsonl"
 THREE_MONTHS = 7_776_000
 THIRTY_DAYS = 2_592_000
 
-
 def clean_old_messages():
     if not os.path.exists(MESSAGES_FILE):
         return
@@ -39,7 +38,6 @@ def clean_old_messages():
         f.write("\n".join(kept) + ("\n" if kept else ""))
 
     print(f"[CLEANER] messages.jsonl: {removed} removidas, {len(kept)} mantidas.")
-
 
 def clean_old_opportunities():
     if not os.path.exists(OPPORTUNITIES_FILE):
@@ -71,7 +69,6 @@ def clean_old_opportunities():
 
     print(f"[CLEANER] opportunities.jsonl: {removed} removidas, {len(kept)} mantidas.")
 
-
 def clean_old_buyers():
     if not os.path.exists(MESSAGES_FILE):
         return
@@ -102,7 +99,6 @@ def clean_old_buyers():
         f.write("\n".join(kept) + ("\n" if kept else ""))
 
     print(f"[CLEANER] buyers antigos: {removed} removidos, {len(kept)} mantidas.")
-
 
 if __name__ == "__main__":
     print(f"[CLEANER] Iniciando - {time.strftime('%Y-%m-%d %H:%M:%S')}")
