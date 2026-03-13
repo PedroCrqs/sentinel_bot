@@ -9,4 +9,5 @@ __pycache__/
 *.pyc
 .env
 *.log
-data/
+data/*
+!data/.gitkeep
