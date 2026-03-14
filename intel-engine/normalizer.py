@@ -54,6 +54,8 @@ NEIGHBORHOOD_ALIASES = {
 
 NEIGHBORHOOD_PARENT = {
     "barra bonita": "RECREIO",
+    "pontal oceanico": "RECREIO",
+    "zico": "RECREIO",
 }
 
 CONDOMINIUM = [
@@ -88,6 +90,7 @@ CONDOMINIUM = [
     "Floresta Park",
     "Fontano",
     "Four Seasons",
+    "Frames",
     "Freedom",
     "Gleba A",
     "Gleba B",
@@ -112,6 +115,7 @@ CONDOMINIUM = [
     "Maayan",
     "Malibu",
     "Mandala",
+    "Maui",
     "Maramar",
     "Marina Costabella",
     "Mediterrâneo",
@@ -143,12 +147,14 @@ CONDOMINIUM = [
     "Royal Green",
     "Santa Marina",
     "Santa Mônica Special",
+    "Saint Vivant",
     "Sublime Max",
     "Sunset",
     "Terra Nossa",
     "Terrazas",
     "Varandas",
     "Verano",
+    "Vitality Spa",
     "Villa Blanca",
     "Villas da Barra",
     "Viverde",

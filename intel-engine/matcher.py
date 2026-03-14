@@ -16,7 +16,29 @@ def neighborhood_match(buyer_neighborhoods, seller_neighborhoods):
         seller_neighborhoods, list
     ):
         return False
-    return len(set(buyer_neighborhoods) & set(seller_neighborhoods)) > 0
+
+    from normalizer import NEIGHBORHOOD_PARENT
+
+    SUBBAIRRO_TO_PARENT = {
+        raw.upper(): parent for raw, parent in NEIGHBORHOOD_PARENT.items()
+    }
+
+    buyer_set = set(buyer_neighborhoods)
+    seller_set = set(seller_neighborhoods)
+
+    common = buyer_set & seller_set
+    if not common:
+        return False
+
+    for subbairro, parent in SUBBAIRRO_TO_PARENT.items():
+        buyer_wants_subbairro = subbairro in buyer_set
+        seller_has_subbairro = subbairro in seller_set
+        match_only_via_parent = (parent in common) and (subbairro not in common)
+
+        if buyer_wants_subbairro and match_only_via_parent and not seller_has_subbairro:
+            common.discard(parent)
+
+    return len(common) > 0
 
 
 def price_match(buyer_price, seller_price):
