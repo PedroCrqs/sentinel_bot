@@ -16,12 +16,9 @@ PROPERTY_TYPE_MAP = {
 NEIGHBORHOODS = [
     "recreio",
     "barra da tijuca",
-    "barra olimpica",
     "barra olímpica",
-    "barra bonita",
     "barra",
     "jacarepaguá",
-    "jacarepagua",
     "vargem grande",
     "vargem pequena",
     "freguesia",
@@ -33,30 +30,91 @@ NEIGHBORHOODS = [
     "anil",
     "pechincha",
     "itanhangá",
-    "itanhanga",
     "humaitá",
-    "humaita",
-    "pontal oceanico",
+    "flamengo",
+    "botafogo",
+    "são conrado",
+    "leblon",
+    "lagoa",
+    "gávea",
+    "jardim botânico",
+    "leme",
+    "urca",
+    "catete",
+    "glória",
+    "laranjeiras",
 ]
 
 NEIGHBORHOOD_ALIASES = {
     "barra da tijuca": "BARRA",
     "barra": "BARRA",
-    "barra olimpica": "BARRA OLIMPICA",
     "barra olímpica": "BARRA OLIMPICA",
     "jacarepaguá": "JACAREPAGUÁ",
-    "jacarepagua": "JACAREPAGUÁ",
     "itanhangá": "ITANHANGÁ",
-    "itanhanga": "ITANHANGÁ",
     "humaitá": "HUMAITÁ",
-    "humaita": "HUMAITÁ",
+    "são conrado": "SÃO CONRADO",
+    "gávea": "GÁVEA",
+    "jardim botânico": "JARDIM BOTÂNICO",
+    "glória": "GLÓRIA",
 }
 
 NEIGHBORHOOD_PARENT = {
     "barra bonita": "RECREIO",
     "pontal oceanico": "RECREIO",
     "zico": "RECREIO",
+    "cidade jardim": "BARRA",
 }
+
+ZONES = {
+    "ZONA SUDOESTE": {
+        "aliases": [
+            "zona sudoeste",
+            "z. sudoeste",
+            "zona oeste",
+            "z. oeste",
+            "zo",
+        ],
+        "neighborhoods": [
+            "RECREIO",
+            "BARRA",
+            "BARRA OLIMPICA",
+            "JACAREPAGUÁ",
+            "FREGUESIA",
+            "CURICICA",
+            "TAQUARA",
+            "ANIL",
+            "PECHINCHA",
+            "ITANHANGÁ",
+            "VARGEM GRANDE",
+            "VARGEM PEQUENA",
+        ],
+    },
+    "ZONA SUL": {
+        "aliases": [
+            "zona sul",
+            "z. sul",
+            "zs",
+        ],
+        "neighborhoods": [
+            "IPANEMA",
+            "COPACABANA",
+            "HUMAITÁ",
+            "FLAMENGO",
+            "BOTAFOGO",
+            "SÃO CONRADO",
+            "LEBLON",
+            "LAGOA",
+            "GÁVEA",
+            "JARDIM BOTÂNICO",
+            "LEME",
+            "URCA",
+            "CATETE",
+            "GLÓRIA",
+            "LARANJEIRAS",
+        ],
+    },
+}
+
 
 CONDOMINIUM = [
     "Acqua Marine",
@@ -141,6 +199,7 @@ CONDOMINIUM = [
     "Recanto das Garças",
     "Recanto do Pontal",
     "Reserva Jardim",
+    "Reserva do Parque",
     "Rio Mar",
     "Riserva Golf",
     "Riviera Del Sol",
@@ -148,6 +207,7 @@ CONDOMINIUM = [
     "Santa Marina",
     "Santa Mônica Special",
     "Saint Vivant",
+    "Stories Residence",
     "Sublime Max",
     "Sunset",
     "Terra Nossa",
@@ -176,6 +236,10 @@ class NormalizedAd:
         self.original_content = original_content
         self.condominium = None
         self.nearbeach = False
+        self.seafront = False
+        self.sun_type = None
+        self.parking_spots = None
+        self.zone = None
 
     def _normalize_text(self, text: str) -> str:
         text = text.lower()
@@ -398,8 +462,17 @@ class NormalizedAd:
         return text
 
     def extract_neighborhood(self):
-        text_accented = self.text
-        text_no_accent = self._remove_accents(self.text)
+        masked_accented = self.text
+        masked_no_accent = self._remove_accents(self.text)
+
+        for cond in sorted(CONDOMINIUM, key=len, reverse=True):
+            cond_lower = cond.lower()
+            cond_no_accent = self._remove_accents(cond_lower)
+            masked_accented = masked_accented.replace(cond_lower, "")
+            masked_no_accent = masked_no_accent.replace(cond_no_accent, "")
+
+        text_accented = masked_accented
+        text_no_accent = masked_no_accent
 
         found = set()
         matched_strings = []
@@ -445,10 +518,65 @@ class NormalizedAd:
         return self.condominium
 
     def extract_nearbeach(self):
-        text_lower = self.raw_text.lower()
-        keywords = ["praia", "lúcio costa", "lucio costa"]
+        text_lower = self._remove_accents(self.raw_text.lower())
+        keywords = ["praia", "lucio costa"]
         self.nearbeach = any(kw in text_lower for kw in keywords)
+
+        seafront_keywords = ["frente mar", "frontal mar", "pe na areia"]
+        self.seafront = any(kw in text_lower for kw in seafront_keywords)
+
+        if self.seafront:
+            self.nearbeach = True
+
         return self.nearbeach
+
+    def extract_sun_type(self):
+        text_lower = self._remove_accents(self.raw_text.lower())
+
+        morning_keywords = ["sol da manha", "sol manha"]
+        afternoon_keywords = ["sol da tarde", "sol tarde"]
+        passthrough_keywords = ["sol passante", "passante"]
+
+        if any(kw in text_lower for kw in morning_keywords):
+            self.sun_type = "MANHA"
+        elif any(kw in text_lower for kw in afternoon_keywords):
+            self.sun_type = "TARDE"
+        elif any(kw in text_lower for kw in passthrough_keywords):
+            self.sun_type = "PASSANTE"
+        else:
+            self.sun_type = None
+
+        return self.sun_type
+
+    def extract_parking_spots(self):
+        text = self.raw_text.lower()
+        spots = []
+
+        patterns = [
+            r"(\d+)\s*vaga[s]?\b",
+            r"vaga[s]?\s*:?\s*(\d+)",
+            r"(\d+)\s*garagem\b",
+            r"garagem\s*:?\s*(\d+)",
+        ]
+
+        for pattern in patterns:
+            matches = re.findall(pattern, text)
+            for m in matches:
+                try:
+                    spots.append(int(m))
+                except ValueError:
+                    continue
+
+        if not spots:
+            self.parking_spots = None
+            return self.parking_spots
+
+        if self.intent == "sell":
+            self.parking_spots = max(spots)
+        else:
+            self.parking_spots = min(spots)
+
+        return self.parking_spots
 
     def extract_area(self):
         text = self.raw_text.lower()
@@ -479,25 +607,55 @@ class NormalizedAd:
 
         return self.area_m2
 
+    def extract_zone(self):
+        if self.intent != "buy":
+            self.zone = None
+            return None
+
+        text_no_accent = self._remove_accents(self.raw_text.lower())
+
+        for zone_name, zone_data in ZONES.items():
+            for alias in zone_data["aliases"]:
+                if self._remove_accents(alias) in text_no_accent:
+                    self.zone = zone_name
+                    existing = set(self.neighborhood)
+                    for n in zone_data["neighborhoods"]:
+                        existing.add(n)
+                    self.neighborhood = list(existing)
+                    return self.zone
+
+        self.zone = None
+        return None
+
     def normalize(self):
         self.extract_property_type()
         self.extract_price()
         self.extract_bedrooms()
         self.extract_neighborhood()
+        self.extract_zone()
         self.extract_area()
+        self.extract_parking_spots()
         self.extract_condominium()
         self.extract_nearbeach()
+        self.extract_sun_type()
+
+        if self.intent == "sell" and len(self.neighborhood) > 1:
+            self.neighborhood = [max(self.neighborhood, key=len)]
 
         return {
             "intent": self.intent,
             "property_type": self.property_type,
             "neighborhood": self.neighborhood,
+            "zone": self.zone,
             "price": self.price,
             "bedrooms": self.bedrooms,
             "raw_text": self.raw_text,
             "area_m2": self.area_m2,
+            "parking_spots": self.parking_spots,
             "condominium": self.condominium,
             "nearbeach": self.nearbeach,
+            "seafront": self.seafront,
+            "sun_type": self.sun_type,
             "original_content": self.original_content,
         }
 

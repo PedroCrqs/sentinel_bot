@@ -6,6 +6,9 @@ OPPORTUNITY_SIGNALS = {
     "bedrooms": 5,
     "condominium": 15,
     "nearbeach": 10,
+    "seafront": 10,
+    "sun_type": 5,
+    "parking_spots": 5,
 }
 
 
@@ -61,10 +64,28 @@ def area_match(buyer_area, seller_area):
     return seller_area >= buyer_area
 
 
+def parking_spots_match(buyer_parking, seller_parking):
+    if seller_parking is None:
+        return False
+    return seller_parking >= buyer_parking
+
+
 def nearbeach_match(buyer_nearbeach, seller_nearbeach):
     if buyer_nearbeach and not seller_nearbeach:
         return False
     return True
+
+
+def seafront_match(buyer_seafront, seller_seafront):
+    if buyer_seafront and not seller_seafront:
+        return False
+    return True
+
+
+def sun_type_match(buyer_sun_type, seller_sun_type):
+    if not buyer_sun_type or not seller_sun_type:
+        return False
+    return buyer_sun_type == seller_sun_type
 
 
 def condominium_match(buyer_condominium, seller_condominium):
@@ -115,8 +136,17 @@ def get_opportunity(sellers_padronized, buyers_padronized):
             if buyer.get("property_type") == seller.get("property_type"):
                 score += OPPORTUNITY_SIGNALS["property_type"]
 
-            if area_match(buyer.get("area_m2"), seller.get("area_m2")):
+            buyer_area = buyer.get("area_m2")
+            if buyer_area is not None:
+                if not area_match(buyer_area, seller.get("area_m2")):
+                    continue
                 score += OPPORTUNITY_SIGNALS["area_m2"]
+
+            buyer_parking = buyer.get("parking_spots")
+            if buyer_parking is not None:
+                if not parking_spots_match(buyer_parking, seller.get("parking_spots")):
+                    continue
+                score += OPPORTUNITY_SIGNALS["parking_spots"]
 
             buyer_cond = buyer.get("condominium")
             seller_cond = seller.get("condominium")
@@ -128,6 +158,20 @@ def get_opportunity(sellers_padronized, buyers_padronized):
                 continue
             if buyer_nearbeach and seller_nearbeach:
                 score += OPPORTUNITY_SIGNALS["nearbeach"]
+
+            buyer_seafront = buyer.get("seafront", False)
+            seller_seafront = seller.get("seafront", False)
+            if not seafront_match(buyer_seafront, seller_seafront):
+                continue
+            if buyer_seafront and seller_seafront:
+                score += OPPORTUNITY_SIGNALS["seafront"]
+
+            buyer_sun_type = buyer.get("sun_type")
+            seller_sun_type = seller.get("sun_type")
+            if buyer_sun_type:
+                if sun_type_match(buyer_sun_type, seller_sun_type):
+                    score += OPPORTUNITY_SIGNALS["sun_type"]
+
             if buyer_cond:
                 if not condominium_match(buyer_cond, seller_cond):
                     continue
