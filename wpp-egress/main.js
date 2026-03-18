@@ -20,7 +20,7 @@ if (!fs.existsSync(STATE_FILE)) {
 const client = new Client({
   authStrategy: new LocalAuth({ dataPath: SESSION_PATH }),
   puppeteer: {
-    headless: true,
+    headless: false,
     args: ["--no-sandbox", "--disable-setuid-sandbox"],
   },
 });

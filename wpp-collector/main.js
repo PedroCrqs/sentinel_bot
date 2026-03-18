@@ -7,6 +7,7 @@ const crypto = require("crypto");
 const SESSION_PATH = path.join(__dirname, "session");
 const OUTPUT_FILE = path.join(__dirname, "../data/messages.jsonl");
 const DEDUP_WINDOW = 7776000;
+const BLOCKED_IDS = new Set(["37658826899485@lid"]);
 
 const knownIds = new Set();
 const lastSeenAds = new Map();
@@ -90,6 +91,7 @@ client.on("message", async (message) => {
     if (!chat.isGroup) return;
 
     const authorId = message.author || message.from;
+    if (BLOCKED_IDS.has(authorId)) return;
     const adHash = generateHash(message.body);
     const now = Math.floor(Date.now() / 1000);
 
