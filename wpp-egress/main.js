@@ -20,7 +20,7 @@ if (!fs.existsSync(STATE_FILE)) {
 const client = new Client({
   authStrategy: new LocalAuth({ dataPath: SESSION_PATH }),
   puppeteer: {
-    headless: false,
+    headless: true,
     args: ["--no-sandbox", "--disable-setuid-sandbox"],
   },
 });
@@ -144,6 +144,12 @@ function format(o) {
   const buyerCond = formatCondominium(o.buyer.condominium);
   if (buyerCond) message += `🏘️ Cond: ${buyerCond}\n`;
   if (o.buyer.nearbeach) message += `🌊 Próximo à praia\n`;
+  if (o.buyer.seafront) message += `🏖️ Frente mar\n`;
+  if (o.buyer.sun_type)
+    message += `☀️ Sol: ${o.buyer.sun_type.charAt(0) + o.buyer.sun_type.slice(1).toLowerCase()}\n`;
+  if (o.buyer.parking_spots)
+    message += `🚗 ${o.buyer.parking_spots} vaga${o.buyer.parking_spots > 1 ? "s" : ""}\n`;
+  if (o.buyer.zone) message += `🗺️ Zona: ${o.buyer.zone}\n`;
 
   message += `\nTexto original:\n_${o.buyer.raw_text}_\n`;
 
@@ -166,6 +172,11 @@ function format(o) {
   const sellerCond = formatCondominium(o.seller.condominium);
   if (sellerCond) message += `🏘️ Cond: ${sellerCond}\n`;
   if (o.seller.nearbeach) message += `🌊 Próximo à praia\n`;
+  if (o.seller.seafront) message += `🏖️ Frente mar\n`;
+  if (o.seller.sun_type)
+    message += `☀️ Sol: ${o.seller.sun_type.charAt(0) + o.seller.sun_type.slice(1).toLowerCase()}\n`;
+  if (o.seller.parking_spots)
+    message += `🚗 ${o.seller.parking_spots} vaga${o.seller.parking_spots > 1 ? "s" : ""}\n`;
 
   message += `\nTexto original:\n_${o.seller.raw_text}_`;
 

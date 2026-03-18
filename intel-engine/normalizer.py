@@ -72,7 +72,6 @@ ZONES = {
             "z. sudoeste",
             "zona oeste",
             "z. oeste",
-            "zo",
         ],
         "neighborhoods": [
             "RECREIO",
@@ -608,21 +607,25 @@ class NormalizedAd:
         return self.area_m2
 
     def extract_zone(self):
-        if self.intent != "buy":
-            self.zone = None
-            return None
-
         text_no_accent = self._remove_accents(self.raw_text.lower())
 
-        for zone_name, zone_data in ZONES.items():
-            for alias in zone_data["aliases"]:
-                if self._remove_accents(alias) in text_no_accent:
-                    self.zone = zone_name
-                    existing = set(self.neighborhood)
-                    for n in zone_data["neighborhoods"]:
-                        existing.add(n)
-                    self.neighborhood = list(existing)
-                    return self.zone
+        if self.intent == "buy":
+            for zone_name, zone_data in ZONES.items():
+                for alias in sorted(zone_data["aliases"], key=len, reverse=True):
+                    pattern = r"\b" + re.escape(self._remove_accents(alias)) + r"\b"
+                    if re.search(pattern, text_no_accent):
+                        self.zone = zone_name
+                        existing = set(self.neighborhood)
+                        for n in zone_data["neighborhoods"]:
+                            existing.add(n)
+                        self.neighborhood = list(existing)
+                        return self.zone
+        else:
+            for neighborhood in self.neighborhood:
+                for zone_name, zone_data in ZONES.items():
+                    if neighborhood.upper() in zone_data["neighborhoods"]:
+                        self.zone = zone_name
+                        return self.zone
 
         self.zone = None
         return None
