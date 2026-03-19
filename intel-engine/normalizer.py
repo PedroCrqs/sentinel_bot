@@ -35,7 +35,6 @@ NEIGHBORHOODS = [
     "botafogo",
     "são conrado",
     "leblon",
-    "lagoa",
     "gávea",
     "jardim botânico",
     "leme",
