@@ -2,7 +2,8 @@ import json
 
 MESSAGES_FILE = "../data/messages.jsonl"
 OPPORTUNITIES_FILE = "../data/opportunities.jsonl"
-BLOCKED_ID = "37658826899485@lid"
+# Add id from user who you want to purge
+BLOCKED_ID = "228707713171512@lid"
 
 
 def purge_messages():
