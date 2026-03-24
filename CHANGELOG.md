@@ -5,6 +5,58 @@ Based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+# CHANGELOG
+
+## [1.5.0] - 2026-03-24
+
+### English
+
+#### Added
+
+- Added **Saint Tropez** to the recognized condominiums list in the normalizer.
+- New `generateHash` logic using regex to strip emojis, symbols, and extra spaces for better deduplication.
+
+#### Changed
+
+- Updated **Cidade Jardim** location mapping: now linked to **Barra Olímpica** instead of Barra da Tijuca.
+- Upgraded `whatsapp-web.js` dependency to the latest version for improved stability.
+
+---
+
+### Português
+
+#### Adicionado
+
+- Adicionado o condomínio **Saint Tropez** à lista de condomínios reconhecidos no normalizador.
+- Nova lógica de `generateHash` usando regex para remover emojis, símbolos e espaços extras, melhorando a deduplicação.
+
+#### Alterado
+
+- Atualizado o mapeamento do bairro **Cidade Jardim**: agora vinculado à **Barra Olímpica** em vez da Barra da Tijuca.
+- Atualizada a dependência `whatsapp-web.js` para a versão mais recente visando maior estabilidade.
+
+## [1.4.0] - 2026-03-24
+
+### Added (Inglês)
+
+- Support for `sub_neighborhood` extraction using spaCy in `normalizer.py`.
+- Exact match logic for sub-localities in `matcher.py`.
+
+### Adicionado (Português)
+
+- Suporte para extração de `sub_neighborhood` usando spaCy no `normalizer.py`.
+- Lógica de correspondência exata para sub-localidades no `matcher.py`.
+
+### Changed (Inglês)
+
+- `formatNeighborhood` in `main.js` now supports dual-level location display.
+- Seller deduplication now prioritizes sub-neighborhoods over string length.
+
+### Alterado (Português)
+
+- `formatNeighborhood` no `main.js` agora suporta exibição de localização em dois níveis.
+- A deduplicação de vendedores agora prioriza sub-bairros em vez do comprimento da string.
+
 ## [1.3.0] - 2026-02-11 (EN)
 
 ### Added
