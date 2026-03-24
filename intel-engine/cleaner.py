@@ -3,6 +3,7 @@ import time
 import os
 import hashlib
 import re
+import unicodedata
 from classifier import classify_message
 
 MESSAGES_FILE = "../data/messages.jsonl"
@@ -16,30 +17,9 @@ FIFTEEN_DAYS = 1_296_000
 
 
 def _normalize_for_hash(text: str) -> str:
-    """Mesma lógica do main.js: lowercase, remove acentos, emojis e pontuação."""
-    text = text.lower()
-    replacements = {
-        "á": "a",
-        "à": "a",
-        "ã": "a",
-        "â": "a",
-        "é": "e",
-        "ê": "e",
-        "è": "e",
-        "í": "i",
-        "ì": "i",
-        "î": "i",
-        "ó": "o",
-        "õ": "o",
-        "ô": "o",
-        "ò": "o",
-        "ú": "u",
-        "ü": "u",
-        "ù": "u",
-        "ç": "c",
-    }
-    for old, new in replacements.items():
-        text = text.replace(old, new)
+    """Mesma lógica do main.js: lowercase, remove acentos via NFD e pontuação."""
+    text = unicodedata.normalize("NFD", text.lower())
+    text = "".join(c for c in text if unicodedata.category(c) != "Mn")
     text = re.sub(r"[^\w\s]", " ", text)
     text = re.sub(r"\s+", " ", text).strip()
     return text
@@ -248,13 +228,27 @@ def clean_and_dedup_opportunities():
     )
 
 
-def dedup_engine_state():
+def reconcile_engine_state():
     """
-    Remove IDs e hashes duplicados dentro do engine_state.json.
-    O arquivo cresce indefinidamente se o engine rodar sem limpeza de estado.
+    Reconstrói seen_ids e seen_hashes do zero a partir do messages.jsonl atual.
+    Garante que o engine_state.json fique estritamente proporcional ao que
+    existe no arquivo de mensagens — nunca maior.
+    Cobre também o caso de messages.jsonl ausente ou corrompido.
     """
     if not os.path.exists(ENGINE_STATE_FILE):
         return
+
+    if not os.path.exists(MESSAGES_FILE):
+        with open(ENGINE_STATE_FILE, "w") as f:
+            json.dump({"seen_ids": [], "seen_hashes": []}, f)
+        print("[CLEANER] engine_state.json: zerado (messages.jsonl ausente).")
+        return
+
+    rows = _load_jsonl(MESSAGES_FILE)
+    real_ids = [
+        obj.get("message_id") for _, obj in rows if obj and obj.get("message_id")
+    ]
+    real_hashes = [obj.get("ad_hash") for _, obj in rows if obj and obj.get("ad_hash")]
 
     try:
         with open(ENGINE_STATE_FILE) as f:
@@ -263,22 +257,20 @@ def dedup_engine_state():
         print("[CLEANER] engine_state.json: não foi possível ler, pulando.")
         return
 
-    original_ids = state.get("seen_ids", [])
-    original_hashes = state.get("seen_hashes", [])
+    previous_ids = len(state.get("seen_ids", []))
+    previous_hashes = len(state.get("seen_hashes", []))
 
-    state["seen_ids"] = list(dict.fromkeys(original_ids))
-    state["seen_hashes"] = list(dict.fromkeys(original_hashes))
-
-    removed_ids = len(original_ids) - len(state["seen_ids"])
-    removed_hashes = len(original_hashes) - len(state["seen_hashes"])
+    state["seen_ids"] = real_ids
+    state["seen_hashes"] = real_hashes
 
     with open(ENGINE_STATE_FILE, "w") as f:
         json.dump(state, f)
 
     print(
-        f"[CLEANER] engine_state.json: "
-        f"{removed_ids} IDs duplicados removidos, "
-        f"{removed_hashes} hashes duplicados removidos."
+        f"[CLEANER] engine_state.json: reconciliado — "
+        f"{previous_ids - len(real_ids)} IDs removidos, "
+        f"{previous_hashes - len(real_hashes)} hashes removidos, "
+        f"{len(real_ids)} IDs e {len(real_hashes)} hashes mantidos."
     )
 
 
@@ -315,7 +307,7 @@ if __name__ == "__main__":
     print("=" * 60)
     clean_and_dedup_messages()
     clean_and_dedup_opportunities()
-    dedup_engine_state()
+    reconcile_engine_state()
     dedup_dispatch_state()
     print("=" * 60)
     print("[CLEANER] Concluído.")
