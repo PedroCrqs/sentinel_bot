@@ -76,11 +76,20 @@ client.on("auth_failure", (msg) => {
   console.log("=".repeat(80));
 });
 
+const normalizeText = (text) => {
+  return text
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[\p{Emoji_Presentation}\p{Extended_Pictographic}]/gu, "")
+    .replace(/[^\w\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+};
+
 const generateHash = (text) => {
-  return crypto
-    .createHash("sha256")
-    .update(text.toLowerCase().replace(/\s+/g, "").trim())
-    .digest("hex");
+  const normalized = normalizeText(text);
+  return crypto.createHash("md5").update(normalized).digest("hex");
 };
 
 client.on("message", async (message) => {
@@ -92,6 +101,7 @@ client.on("message", async (message) => {
 
     const authorId = message.author || message.from;
     if (BLOCKED_IDS.has(authorId)) return;
+
     const adHash = generateHash(message.body);
     const now = Math.floor(Date.now() / 1000);
 
@@ -101,6 +111,7 @@ client.on("message", async (message) => {
     }
 
     const contact = await message.getContact();
+
     const payload = {
       message_id: message.id.id,
       group_id: chat.id._serialized,
@@ -116,6 +127,7 @@ client.on("message", async (message) => {
     fs.appendFileSync(OUTPUT_FILE, JSON.stringify(payload) + "\n", {
       encoding: "utf-8",
     });
+
     knownIds.add(payload.message_id);
     lastSeenAds.set(adHash, payload.timestamp);
 
