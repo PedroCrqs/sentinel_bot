@@ -5,7 +5,39 @@ Based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
-# CHANGELOG
+## [1.6.0] - 2026-03-24
+
+### English
+
+#### Added
+
+- `cleaner.py`: Full deduplication pipeline — messages deduplicated by `message_id` and `ad_hash`, with on-the-fly hash recomputation for legacy records missing the field.
+- `cleaner.py`: New `dedup_engine_state()` — removes duplicate `seen_ids` and `seen_hashes` from `engine_state.json`, which previously grew unbounded.
+- `cleaner.py`: New `dedup_dispatch_state()` — sanitizes `state.json` by removing null/invalid entries from the `sent` dict.
+- `egest.py`: Pre-write dedup check — `export_opportunities` now reads existing IDs before appending, preventing duplicate opportunity pairs across engine restarts.
+- `engine.py`: Intra-batch dedup via `batch_ids` and `batch_hashes` — blocks duplicate messages that arrive in the same processing cycle before `save_state` runs.
+
+#### Changed
+
+- `cleaner.py`: `clean_old_messages`, `clean_old_opportunities`, and `clean_old_buyers` merged into unified functions `clean_and_dedup_messages()` and `clean_and_dedup_opportunities()`.
+- `cleaner.py`: Opportunity retention window reduced from **30 days to 15 days**.
+
+---
+
+### Português
+
+#### Adicionado
+
+- `cleaner.py`: Pipeline completo de deduplicação — mensagens deduplicadas por `message_id` e `ad_hash`, com recálculo de hash em tempo de execução para registros antigos sem o campo.
+- `cleaner.py`: Nova função `dedup_engine_state()` — remove `seen_ids` e `seen_hashes` duplicados do `engine_state.json`, que antes crescia indefinidamente.
+- `cleaner.py`: Nova função `dedup_dispatch_state()` — sanitiza o `state.json` removendo entradas nulas/inválidas do dict `sent`.
+- `egest.py`: Verificação de dedup antes do append — `export_opportunities` agora lê os IDs existentes antes de gravar, prevenindo pares de oportunidades duplicados entre reinicializações do engine.
+- `engine.py`: Dedup intra-batch via `batch_ids` e `batch_hashes` — bloqueia mensagens duplicadas que chegam no mesmo ciclo de processamento, antes do `save_state` executar.
+
+#### Alterado
+
+- `cleaner.py`: As funções `clean_old_messages`, `clean_old_opportunities` e `clean_old_buyers` foram unificadas em `clean_and_dedup_messages()` e `clean_and_dedup_opportunities()`.
+- `cleaner.py`: Janela de retenção de oportunidades reduzida de **30 para 15 dias**.
 
 ## [1.5.0] - 2026-03-24
 
