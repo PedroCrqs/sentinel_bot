@@ -61,7 +61,7 @@ NEIGHBORHOOD_PARENT = {
     "barra bonita": "RECREIO",
     "pontal oceanico": "RECREIO",
     "zico": "RECREIO",
-    "cidade jardim": "BARRA",
+    "cidade jardim": "BARRA OLIMPICA",
 }
 
 # Sub-bairros extraídos do NEIGHBORHOOD_PARENT — detectados separadamente
@@ -208,6 +208,7 @@ CONDOMINIUM = [
     "Santa Marina",
     "Santa Mônica Special",
     "Saint Vivant",
+    "Saint Tropez",
     "Stories Residence",
     "Sublime Max",
     "Sunset",
