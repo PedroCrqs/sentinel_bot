@@ -64,6 +64,9 @@ NEIGHBORHOOD_PARENT = {
     "cidade jardim": "BARRA",
 }
 
+# Sub-bairros extraídos do NEIGHBORHOOD_PARENT — detectados separadamente
+SUB_NEIGHBORHOODS = list(NEIGHBORHOOD_PARENT.keys())
+
 ZONES = {
     "ZONA SUDOESTE": {
         "aliases": [
@@ -238,6 +241,7 @@ class NormalizedAd:
         self.sun_type = None
         self.parking_spots = None
         self.zone = None
+        self.sub_neighborhood = None
 
     def _normalize_text(self, text: str) -> str:
         text = text.lower()
@@ -475,7 +479,10 @@ class NormalizedAd:
         found = set()
         matched_strings = []
 
-        for bairro in sorted(NEIGHBORHOODS, key=len, reverse=True):
+        # Busca em bairros + sub-bairros juntos (longest first para evitar falsos parciais)
+        all_places = sorted(NEIGHBORHOODS + SUB_NEIGHBORHOODS, key=len, reverse=True)
+
+        for bairro in all_places:
             bairro_no_accent = self._remove_accents(bairro)
 
             in_text = (bairro in text_accented) or (bairro_no_accent in text_no_accent)
@@ -495,7 +502,9 @@ class NormalizedAd:
 
             parent = NEIGHBORHOOD_PARENT.get(bairro)
             if parent:
+                # E um sub-bairro: adiciona o parent e registra o sub-bairro detectado
                 found.add(parent)
+                self.sub_neighborhood = canonical
 
         self.neighborhood = list(found)
         return self.neighborhood
@@ -642,12 +651,17 @@ class NormalizedAd:
         self.extract_sun_type()
 
         if self.intent == "sell" and len(self.neighborhood) > 1:
-            self.neighborhood = [max(self.neighborhood, key=len)]
+            # Se há sub-bairro, ele deve ser o valor retido (é o mais específico)
+            if self.sub_neighborhood and self.sub_neighborhood in self.neighborhood:
+                self.neighborhood = [self.sub_neighborhood]
+            else:
+                self.neighborhood = [max(self.neighborhood, key=len)]
 
         return {
             "intent": self.intent,
             "property_type": self.property_type,
             "neighborhood": self.neighborhood,
+            "sub_neighborhood": self.sub_neighborhood,
             "zone": self.zone,
             "price": self.price,
             "bedrooms": self.bedrooms,

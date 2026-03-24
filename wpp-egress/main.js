@@ -111,8 +111,12 @@ function format(o) {
     return `${bedrooms} quarto${bedrooms > 1 ? "s" : ""}`;
   };
 
-  const formatNeighborhood = (neighborhoods) => {
+  const formatNeighborhood = (neighborhoods, subNeighborhood) => {
     if (!neighborhoods || neighborhoods.length === 0) return "Não informado";
+    if (subNeighborhood) {
+      const parent = neighborhoods.find((n) => n !== subNeighborhood);
+      return parent ? `${parent} › ${subNeighborhood}` : subNeighborhood;
+    }
     return neighborhoods.join(", ");
   };
 
@@ -130,7 +134,7 @@ function format(o) {
   message += `👤 *COMPRADOR*\n`;
   message += `Corretor: ${buyer.author_name}\n`;
   message += `Telefone: ${buyer.author_phone || "Não informado"}\n`;
-  message += `📍 ${formatNeighborhood(o.buyer.neighborhood)}\n`;
+  message += `📍 ${formatNeighborhood(o.buyer.neighborhood, o.buyer.sub_neighborhood)}\n`;
   message += `💰 Até ${formatPrice(o.buyer.price)}\n`;
 
   const buyerDetails = [];
@@ -158,7 +162,7 @@ function format(o) {
   message += `🏢 *VENDEDOR*\n`;
   message += `Corretor: ${seller.author_name}\n`;
   message += `Telefone: ${seller.author_phone || "Não informado"}\n`;
-  message += `📍 ${formatNeighborhood(o.seller.neighborhood)}\n`;
+  message += `📍 ${formatNeighborhood(o.seller.neighborhood, o.seller.sub_neighborhood)}\n`;
   message += `💰 ${formatPrice(o.seller.price)}\n`;
 
   const sellerDetails = [];

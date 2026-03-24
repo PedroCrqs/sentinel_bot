@@ -12,7 +12,10 @@ OPPORTUNITY_SIGNALS = {
 }
 
 
-def neighborhood_match(buyer_neighborhoods, seller_neighborhoods):
+def neighborhood_match(buyer, seller):
+    buyer_neighborhoods = buyer.get("neighborhood")
+    seller_neighborhoods = seller.get("neighborhood")
+
     if not buyer_neighborhoods or not seller_neighborhoods:
         return False
     if not isinstance(buyer_neighborhoods, list) or not isinstance(
@@ -20,28 +23,19 @@ def neighborhood_match(buyer_neighborhoods, seller_neighborhoods):
     ):
         return False
 
-    from normalizer import NEIGHBORHOOD_PARENT
+    buyer_sub = buyer.get("sub_neighborhood")
+    seller_sub = seller.get("sub_neighborhood")
 
-    SUBBAIRRO_TO_PARENT = {
-        raw.upper(): parent for raw, parent in NEIGHBORHOOD_PARENT.items()
-    }
+    # Regra core: se o comprador pediu um sub-bairro específico,
+    # o vendedor DEVE ter exatamente esse sub-bairro.
+    if buyer_sub:
+        return seller_sub == buyer_sub
 
+    # Comprador sem sub-bairro: match normal por interseção de neighborhoods.
+    # Vendedor em sub-bairro pode ser oferecido a comprador que quer o parent.
     buyer_set = set(buyer_neighborhoods)
     seller_set = set(seller_neighborhoods)
-
-    common = buyer_set & seller_set
-    if not common:
-        return False
-
-    for subbairro, parent in SUBBAIRRO_TO_PARENT.items():
-        buyer_wants_subbairro = subbairro in buyer_set
-        seller_has_subbairro = subbairro in seller_set
-        match_only_via_parent = (parent in common) and (subbairro not in common)
-
-        if buyer_wants_subbairro and match_only_via_parent and not seller_has_subbairro:
-            common.discard(parent)
-
-    return len(common) > 0
+    return bool(buyer_set & seller_set)
 
 
 def price_match(buyer_price, seller_price):
@@ -116,9 +110,7 @@ def get_opportunity(sellers_padronized, buyers_padronized):
 
             score = 0
 
-            if not neighborhood_match(
-                buyer.get("neighborhood"), seller.get("neighborhood")
-            ):
+            if not neighborhood_match(buyer, seller):
                 continue
 
             score += OPPORTUNITY_SIGNALS["neighborhood"]
