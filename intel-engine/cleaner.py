@@ -1,6 +1,8 @@
 import json
 import time
 import os
+import hashlib
+import re
 from classifier import classify_message
 
 MESSAGES_FILE = "../data/messages.jsonl"
@@ -10,146 +12,310 @@ DISPATCH_STATE_FILE = "../data/state.json"
 
 THREE_MONTHS = 7_776_000
 THIRTY_DAYS = 2_592_000
+FIFTEEN_DAYS = 1_296_000
 
 
-def sync_engine_state(kept_message_ids):
+def _normalize_for_hash(text: str) -> str:
+    """Mesma lógica do main.js: lowercase, remove acentos, emojis e pontuação."""
+    text = text.lower()
+    replacements = {
+        "á": "a",
+        "à": "a",
+        "ã": "a",
+        "â": "a",
+        "é": "e",
+        "ê": "e",
+        "è": "e",
+        "í": "i",
+        "ì": "i",
+        "î": "i",
+        "ó": "o",
+        "õ": "o",
+        "ô": "o",
+        "ò": "o",
+        "ú": "u",
+        "ü": "u",
+        "ù": "u",
+        "ç": "c",
+    }
+    for old, new in replacements.items():
+        text = text.replace(old, new)
+    text = re.sub(r"[^\w\s]", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
+def _compute_ad_hash(message_text: str) -> str:
+    return hashlib.md5(_normalize_for_hash(message_text).encode()).hexdigest()
+
+
+def _load_jsonl(filepath: str):
+    """Lê um .jsonl e retorna lista de (linha_raw, objeto_parsed). Ignora linhas inválidas."""
+    results = []
+    with open(filepath, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                results.append((line, json.loads(line)))
+            except json.JSONDecodeError:
+                results.append((line, None))
+    return results
+
+
+def _write_jsonl(filepath: str, objects: list):
+    with open(filepath, "w", encoding="utf-8") as f:
+        for obj in objects:
+            f.write(json.dumps(obj, ensure_ascii=False) + "\n")
+
+
+def sync_engine_state(kept_message_ids: list):
     try:
         with open(ENGINE_STATE_FILE) as f:
             state = json.load(f)
-    except:
+    except Exception:
         return
-    kept_set = set(kept_message_ids)
-    state["seen_ids"] = [mid for mid in state.get("seen_ids", []) if mid in kept_set]
+
+    kept_id_set = set(kept_message_ids)
+    state["seen_ids"] = [mid for mid in state.get("seen_ids", []) if mid in kept_id_set]
+
     with open(ENGINE_STATE_FILE, "w") as f:
         json.dump(state, f)
 
 
-def sync_dispatch_state(kept_opp_ids):
+def sync_engine_state_hashes(kept_hashes: list):
+    """Atualiza seen_hashes no engine_state para refletir o que realmente está no arquivo."""
+    try:
+        with open(ENGINE_STATE_FILE) as f:
+            state = json.load(f)
+    except Exception:
+        return
+
+    state["seen_hashes"] = kept_hashes
+
+    with open(ENGINE_STATE_FILE, "w") as f:
+        json.dump(state, f)
+
+
+def sync_dispatch_state(kept_opp_ids: list):
     try:
         with open(DISPATCH_STATE_FILE) as f:
             state = json.load(f)
-    except:
+    except Exception:
         return
+
     kept_set = set(kept_opp_ids)
     state["sent"] = {
         oid: v for oid, v in state.get("sent", {}).items() if oid in kept_set
     }
+
     with open(DISPATCH_STATE_FILE, "w") as f:
         json.dump(state, f, indent=2)
 
 
-def clean_old_messages():
+def clean_and_dedup_messages():
+    """
+    Faz três coisas em uma única passagem sobre messages.jsonl:
+      1. Remove mensagens mais antigas que THREE_MONTHS.
+      2. Remove mensagens de compradores mais antigas que THIRTY_DAYS.
+      3. Remove duplicatas — tanto por message_id quanto por ad_hash.
+         - Se o ad_hash não existir no registro, recalcula a partir do texto.
+         - Quando há duplicata de conteúdo, mantém a mais recente.
+    """
     if not os.path.exists(MESSAGES_FILE):
         return
 
     now = int(time.time())
-    cutoff = now - THREE_MONTHS
+    cutoff_3m = now - THREE_MONTHS
+    cutoff_30d = now - THIRTY_DAYS
 
-    with open(MESSAGES_FILE, "r", encoding="utf-8") as f:
-        lines = f.readlines()
+    rows = _load_jsonl(MESSAGES_FILE)
 
-    kept = []
-    removed = 0
-    for line in lines:
-        line = line.strip()
-        if not line:
+    candidates = []
+    removed_age = 0
+    removed_buyer_age = 0
+
+    for raw, obj in rows:
+        if obj is None:
             continue
-        try:
-            msg = json.loads(line)
-            if msg.get("timestamp", 0) >= cutoff:
-                kept.append(line)
-            else:
-                removed += 1
-        except json.JSONDecodeError:
-            kept.append(line)
 
-    with open(MESSAGES_FILE, "w", encoding="utf-8") as f:
-        f.write("\n".join(kept) + ("\n" if kept else ""))
+        ts = obj.get("timestamp", 0)
 
-    kept_ids = [
-        json.loads(l).get("message_id") for l in kept if json.loads(l).get("message_id")
-    ]
+        if ts < cutoff_3m:
+            removed_age += 1
+            continue
+
+        classification = classify_message(obj)
+        if classification == "buying" and ts < cutoff_30d:
+            removed_buyer_age += 1
+            continue
+
+        candidates.append(obj)
+
+    by_id: dict[str, dict] = {}
+    for obj in candidates:
+        mid = obj.get("message_id")
+        if not mid:
+            by_id[id(obj)] = obj
+            continue
+        existing = by_id.get(mid)
+        if existing is None or obj.get("timestamp", 0) > existing.get("timestamp", 0):
+            by_id[mid] = obj
+
+    by_hash: dict[str, dict] = {}
+    for obj in by_id.values():
+        ad_hash = obj.get("ad_hash")
+        if not ad_hash:
+            msg_text = obj.get("message", "")
+            ad_hash = _compute_ad_hash(msg_text) if msg_text else None
+
+        if not ad_hash:
+            by_hash[obj.get("message_id", str(id(obj)))] = obj
+            continue
+
+        existing = by_hash.get(ad_hash)
+        if existing is None or obj.get("timestamp", 0) > existing.get("timestamp", 0):
+            by_hash[ad_hash] = obj
+
+    kept = list(by_hash.values())
+    removed_dedup = len(candidates) - len(kept)
+
+    _write_jsonl(MESSAGES_FILE, kept)
+
+    kept_ids = [o.get("message_id") for o in kept if o.get("message_id")]
+    kept_hashes = [o.get("ad_hash") for o in kept if o.get("ad_hash")]
     sync_engine_state(kept_ids)
+    sync_engine_state_hashes(kept_hashes)
 
-    print(f"[CLEANER] messages.jsonl: {removed} removidas, {len(kept)} mantidas.")
+    print(
+        f"[CLEANER] messages.jsonl: "
+        f"{removed_age} removidas (3 meses), "
+        f"{removed_buyer_age} compradores antigos removidos, "
+        f"{removed_dedup} duplicatas removidas, "
+        f"{len(kept)} mantidas."
+    )
 
 
-def clean_old_opportunities():
+def clean_and_dedup_opportunities():
+    """
+    1. Remove oportunidades mais antigas que FIFTEEN_DAYS.
+    2. Remove duplicatas por id (MD5 do par buyer+seller message_id).
+       Quando há duplicata, mantém a mais recente (maior timestamp).
+    """
     if not os.path.exists(OPPORTUNITIES_FILE):
         return
 
     now = int(time.time())
-    cutoff = now - THIRTY_DAYS
+    cutoff = now - FIFTEEN_DAYS
 
-    with open(OPPORTUNITIES_FILE, "r", encoding="utf-8") as f:
-        lines = f.readlines()
+    rows = _load_jsonl(OPPORTUNITIES_FILE)
 
-    kept = []
-    removed = 0
-    for line in lines:
-        line = line.strip()
-        if not line:
+    removed_age = 0
+    candidates = []
+
+    for raw, obj in rows:
+        if obj is None:
             continue
-        try:
-            opp = json.loads(line)
-            if opp.get("timestamp", 0) >= cutoff:
-                kept.append(line)
-            else:
-                removed += 1
-        except json.JSONDecodeError:
-            kept.append(line)
+        if obj.get("timestamp", 0) < cutoff:
+            removed_age += 1
+            continue
+        candidates.append(obj)
 
-    with open(OPPORTUNITIES_FILE, "w", encoding="utf-8") as f:
-        f.write("\n".join(kept) + ("\n" if kept else ""))
+    by_id: dict[str, dict] = {}
+    for obj in candidates:
+        oid = obj.get("id")
+        if not oid:
+            by_id[str(id(obj))] = obj
+            continue
+        existing = by_id.get(oid)
+        if existing is None or obj.get("timestamp", 0) > existing.get("timestamp", 0):
+            by_id[oid] = obj
 
-    kept_ids = [json.loads(l).get("id") for l in kept if json.loads(l).get("id")]
+    kept = list(by_id.values())
+    removed_dedup = len(candidates) - len(kept)
+
+    _write_jsonl(OPPORTUNITIES_FILE, kept)
+
+    kept_ids = [o.get("id") for o in kept if o.get("id")]
     sync_dispatch_state(kept_ids)
 
-    print(f"[CLEANER] opportunities.jsonl: {removed} removidas, {len(kept)} mantidas.")
+    print(
+        f"[CLEANER] opportunities.jsonl: "
+        f"{removed_age} removidas (15 dias), "
+        f"{removed_dedup} duplicatas removidas, "
+        f"{len(kept)} mantidas."
+    )
 
 
-def clean_old_buyers():
-    if not os.path.exists(MESSAGES_FILE):
+def dedup_engine_state():
+    """
+    Remove IDs e hashes duplicados dentro do engine_state.json.
+    O arquivo cresce indefinidamente se o engine rodar sem limpeza de estado.
+    """
+    if not os.path.exists(ENGINE_STATE_FILE):
         return
 
-    now = int(time.time())
-    cutoff = now - THIRTY_DAYS
+    try:
+        with open(ENGINE_STATE_FILE) as f:
+            state = json.load(f)
+    except Exception:
+        print("[CLEANER] engine_state.json: não foi possível ler, pulando.")
+        return
 
-    with open(MESSAGES_FILE, "r", encoding="utf-8") as f:
-        lines = f.readlines()
+    original_ids = state.get("seen_ids", [])
+    original_hashes = state.get("seen_hashes", [])
 
-    kept = []
-    removed = 0
-    for line in lines:
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            msg = json.loads(line)
-            classification = classify_message(msg)
-            if classification == "buying" and msg.get("timestamp", 0) < cutoff:
-                removed += 1
-            else:
-                kept.append(line)
-        except json.JSONDecodeError:
-            kept.append(line)
+    state["seen_ids"] = list(dict.fromkeys(original_ids))
+    state["seen_hashes"] = list(dict.fromkeys(original_hashes))
 
-    with open(MESSAGES_FILE, "w", encoding="utf-8") as f:
-        f.write("\n".join(kept) + ("\n" if kept else ""))
+    removed_ids = len(original_ids) - len(state["seen_ids"])
+    removed_hashes = len(original_hashes) - len(state["seen_hashes"])
 
-    kept_ids = [
-        json.loads(l).get("message_id") for l in kept if json.loads(l).get("message_id")
-    ]
-    sync_engine_state(kept_ids)
+    with open(ENGINE_STATE_FILE, "w") as f:
+        json.dump(state, f)
 
-    print(f"[CLEANER] buyers antigos: {removed} removidos, {len(kept)} mantidas.")
+    print(
+        f"[CLEANER] engine_state.json: "
+        f"{removed_ids} IDs duplicados removidos, "
+        f"{removed_hashes} hashes duplicados removidos."
+    )
+
+
+def dedup_dispatch_state():
+    """
+    Remove entradas duplicadas no state.json (chaves 'sent').
+    Como 'sent' é um dict {opp_id: valor}, duplicatas de chave são impossíveis
+    por natureza do JSON — mas verificamos integridade e removemos valores None/inválidos.
+    """
+    if not os.path.exists(DISPATCH_STATE_FILE):
+        return
+
+    try:
+        with open(DISPATCH_STATE_FILE) as f:
+            state = json.load(f)
+    except Exception:
+        print("[CLEANER] state.json: não foi possível ler, pulando.")
+        return
+
+    sent = state.get("sent", {})
+    cleaned = {k: v for k, v in sent.items() if k and v is not None}
+    removed = len(sent) - len(cleaned)
+
+    state["sent"] = cleaned
+
+    with open(DISPATCH_STATE_FILE, "w") as f:
+        json.dump(state, f, indent=2)
+
+    print(f"[CLEANER] state.json: {removed} entradas inválidas/nulas removidas.")
 
 
 if __name__ == "__main__":
     print(f"[CLEANER] Iniciando - {time.strftime('%Y-%m-%d %H:%M:%S')}")
     print("=" * 60)
-    clean_old_messages()
-    clean_old_opportunities()
-    clean_old_buyers()
+    clean_and_dedup_messages()
+    clean_and_dedup_opportunities()
+    dedup_engine_state()
+    dedup_dispatch_state()
     print("=" * 60)
     print("[CLEANER] Concluído.")

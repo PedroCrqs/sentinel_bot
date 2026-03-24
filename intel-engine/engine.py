@@ -15,7 +15,7 @@ def load_state():
             if "seen_hashes" not in state:
                 state["seen_hashes"] = []
             return state
-    except:
+    except Exception:
         return {"seen_ids": [], "seen_hashes": []}
 
 
@@ -32,6 +32,9 @@ def read_new_messages(seen_ids, seen_hashes):
     all_ids = []
     all_hashes = []
 
+    batch_ids = set()
+    batch_hashes = set()
+
     with open("../data/messages.jsonl", encoding="utf-8") as f:
         for line in f:
             line = line.strip()
@@ -44,13 +47,21 @@ def read_new_messages(seen_ids, seen_hashes):
 
             if msg_id:
                 all_ids.append(msg_id)
-
             if ad_hash:
                 all_hashes.append(ad_hash)
 
-            # 🔥 FILTRO DUPLO: ID + HASH
-            if msg_id not in seen_id_set and ad_hash not in seen_hash_set:
-                new_messages.append(msg)
+            id_seen = (msg_id in seen_id_set) or (msg_id in batch_ids)
+            hash_seen = (ad_hash in seen_hash_set) or (ad_hash in batch_hashes)
+
+            if id_seen or hash_seen:
+                continue
+
+            new_messages.append(msg)
+
+            if msg_id:
+                batch_ids.add(msg_id)
+            if ad_hash:
+                batch_hashes.add(ad_hash)
 
     return new_messages, all_ids, all_hashes
 
