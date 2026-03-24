@@ -5,6 +5,24 @@ Based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.6.1] - 2026-03-24
+
+### English
+
+#### Fixed
+
+- `cleaner.py`: Replaced `dedup_engine_state()` with `reconcile_engine_state()` — instead of just removing duplicates, the function now rebuilds `seen_ids` and `seen_hashes` from scratch based on the current `messages.jsonl`, keeping `engine_state.json` strictly proportional to the messages file and preventing unbounded growth.
+
+- `cleaner.py`: Replaced manual accent substitution table in `_normalize_for_hash` with `unicodedata.normalize("NFD")` — now exhaustively covers all Unicode characters, guaranteeing hash parity with `main.js` for any input.
+
+### Português
+
+#### Corrigido
+
+- `cleaner.py`: Substituída `dedup_engine_state()` por `reconcile_engine_state()` — em vez de apenas remover duplicatas, a função agora reconstrói `seen_ids` e `seen_hashes` do zero a partir do `messages.jsonl` atual, mantendo o `engine_state.json` estritamente proporcional ao arquivo de mensagens e prevenindo crescimento ilimitado.
+
+- `cleaner.py`: Substituída tabela manual de acentos em `_normalize_for_hash` por `unicodedata.normalize("NFD")` — agora cobre exaustivamente todos os caracteres Unicode, garantindo paridade de hash com o `main.js` para qualquer entrada.
+
 ## [1.6.0] - 2026-03-24
 
 ### English
@@ -21,8 +39,6 @@ Based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 - `cleaner.py`: `clean_old_messages`, `clean_old_opportunities`, and `clean_old_buyers` merged into unified functions `clean_and_dedup_messages()` and `clean_and_dedup_opportunities()`.
 - `cleaner.py`: Opportunity retention window reduced from **30 days to 15 days**.
-
----
 
 ### Português
 
