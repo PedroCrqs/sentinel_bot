@@ -5,6 +5,18 @@ Based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.6.2] - 2026-03-27
+
+### English
+
+- **Fixed**: Race condition in `engine.py` by ensuring `save_state()` is called before `export_opportunities()`. This prevents duplicate opportunities if the engine crashes.
+
+---
+
+### Português
+
+- **Corrigido**: Condição de corrida no `engine.py` garantindo que o `save_state()` seja chamado antes do `export_opportunities()`. Isso evita duplicatas caso a engine caia durante a execução.
+
 ## [1.6.1] - 2026-03-24
 
 ### English
