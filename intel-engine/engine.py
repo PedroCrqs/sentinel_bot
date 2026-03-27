@@ -80,13 +80,13 @@ while True:
         sellers_pad, buyers_pad = run_normalizer(sellers, buyers)
         opportunities = get_opportunity(sellers_pad, buyers_pad)
 
-        if opportunities:
-            export_opportunities(opportunities)
-
         state["seen_ids"] = all_ids
         state["seen_hashes"] = all_hashes
 
         save_state(state)
+
+        if opportunities:
+            export_opportunities(opportunities)
 
         print("Processed:", len(new_messages))
 
