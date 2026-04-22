@@ -7,7 +7,11 @@ const crypto = require("crypto");
 const SESSION_PATH = path.join(__dirname, "session");
 const OUTPUT_FILE = path.join(__dirname, "../data/messages.jsonl");
 const DEDUP_WINDOW = 7776000;
-const BLOCKED_IDS = new Set(["37658826899485@lid", "228707713171512@lid"]);
+const BLOCKED_IDS = new Set([
+  "37658826899485@lid",
+  "228707713171512@lid",
+  "204388903727229@lid",
+]);
 
 const knownIds = new Set();
 const lastSeenAds = new Map();
