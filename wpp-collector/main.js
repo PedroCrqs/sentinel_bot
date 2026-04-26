@@ -38,6 +38,7 @@ if (!fs.existsSync(SESSION_PATH)) {
 
 const client = new Client({
   authStrategy: new LocalAuth({ dataPath: SESSION_PATH }),
+  executablePath: "/usr/bin/chromium",
   puppeteer: {
     headless: true,
     args: [
