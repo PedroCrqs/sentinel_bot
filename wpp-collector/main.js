@@ -49,9 +49,26 @@ const client = new Client({
       "--no-sandbox",
       "--disable-setuid-sandbox",
       "--disable-dev-shm-usage",
+      "--disable-extensions",
+      "--no-first-run",
+      "--disable-gpu",
+      "--disable-software-rasterizer",
     ],
   },
 });
+
+async function startBot() {
+  try {
+    await console.log("Starting WhatsApp client...");
+    await client.initialize();
+  } catch (err) {
+    await persistence.log(
+      "ERROR",
+      `Initialization failed: ${err.message}. Retrying in 30s...`,
+    );
+    setTimeout(startBot(), 30000);
+  }
+}
 
 client.on("qr", (qr) => {
   qrcode.generate(qr, { small: true });
@@ -79,6 +96,7 @@ client.on("auth_failure", (msg) => {
   console.log("=".repeat(80));
   console.error("AUTH FAILURE:", msg);
   console.log("=".repeat(80));
+  setTimeout(startBot(), 30000);
 });
 
 const normalizeText = (text) => {
@@ -145,4 +163,4 @@ client.on("message", async (message) => {
   }
 });
 
-client.initialize();
+startBot();
