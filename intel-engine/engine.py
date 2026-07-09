@@ -1,11 +1,25 @@
-import time
 import json
+import time
+
 from classifier import run_classifier
-from normalizer import run_normalizer
+from cleaner import (
+    clean_and_dedup_messages,
+    clean_and_dedup_opportunities,
+    clean_and_dedup_self_opportunities,
+    dedup_dispatch_state,
+    reconcile_engine_state,
+)
+from database import get_property_details
+from egest import export_opportunities, export_self_opportunities
 from matcher import get_opportunity
-from egest import export_opportunities
+from normalizer import run_normalizer, run_self_normalizer
 
 STATE_FILE = "../data/engine_state.json"
+
+# Intervalo entre execuções do cleaner. Não roda a cada iteração do loop
+# (a cada 3s) porque cleaner.py reescreve os .jsonl inteiros — caro demais
+# pra rodar com essa frequência.
+CLEANUP_INTERVAL_SECONDS = 3600  # 1 hora
 
 
 def load_state():
@@ -66,8 +80,18 @@ def read_new_messages(seen_ids, seen_hashes):
     return new_messages, all_ids, all_hashes
 
 
-while True:
+def run_cleanup():
+    print(f"[ENGINE] Rodando limpeza periódica ({time.strftime('%Y-%m-%d %H:%M:%S')})")
+    clean_and_dedup_messages()
+    clean_and_dedup_opportunities()
+    clean_and_dedup_self_opportunities()
+    reconcile_engine_state()
+    dedup_dispatch_state()
 
+
+last_cleanup = 0.0
+
+while True:
     state = load_state()
 
     new_messages, all_ids, all_hashes = read_new_messages(
@@ -75,19 +99,31 @@ while True:
     )
 
     if new_messages:
-
         sellers, buyers, useless = run_classifier(new_messages)
         sellers_pad, buyers_pad = run_normalizer(sellers, buyers)
-        opportunities = get_opportunity(sellers_pad, buyers_pad)
+        self_ads = run_self_normalizer(get_property_details())
+
+        # TEMP (v1.7.0): matching comprador-vendedor regular em standby
+        # enquanto testamos a priorização de imóveis próprios.
+        # Para reativar: descomente as duas linhas abaixo.
+        # opportunities = get_opportunity(sellers_pad, buyers_pad)
+        self_opportunities = get_opportunity(self_ads, buyers_pad)
 
         state["seen_ids"] = all_ids
         state["seen_hashes"] = all_hashes
 
         save_state(state)
 
-        if opportunities:
-            export_opportunities(opportunities)
+        # if opportunities:
+        #     export_opportunities(opportunities)
+
+        if self_opportunities:
+            export_self_opportunities(self_opportunities)
 
         print("Processed:", len(new_messages))
+
+    if time.time() - last_cleanup >= CLEANUP_INTERVAL_SECONDS:
+        run_cleanup()
+        last_cleanup = time.time()
 
     time.sleep(3)
