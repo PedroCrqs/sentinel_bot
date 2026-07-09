@@ -32,8 +32,11 @@ module.exports = {
     {
       name: "sentinel-engine", // classificação, normalização, matching, cleanup periódico
       script: "engine.py",
+      interpreter: path.join(__dirname, "intel-engine", "venv", "bin", "python"),
       cwd: path.join(__dirname, "intel-engine"),
-      interpreter: "python3",
+      env: {
+        NODE_ENV: "production"
+      },
       autorestart: true,
       max_restarts: 15,
       restart_delay: 5000,
