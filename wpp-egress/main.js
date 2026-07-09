@@ -6,7 +6,13 @@ const { Client, LocalAuth } = require("whatsapp-web.js");
 const SESSION_PATH = path.join(__dirname, "session");
 const STATE_FILE = path.join(__dirname, "../data/state.json");
 const OPPORTUNITIES_FILE = path.join(__dirname, "../data/opportunities.jsonl");
+const SELF_OPPORTUNITIES_FILE = path.join(
+  __dirname,
+  "../data/self_opportunities.jsonl",
+);
 const GROUP_ID = "120363424642701935@g.us";
+// Imóveis próprios: notificação prioritária vai direto por DM, não pro grupo
+const PRIORITY_CONTACT_ID = "96654279573661@lid";
 
 if (!fs.existsSync(SESSION_PATH)) {
   fs.mkdirSync(SESSION_PATH, { recursive: true });
@@ -14,7 +20,10 @@ if (!fs.existsSync(SESSION_PATH)) {
 
 if (!fs.existsSync(STATE_FILE)) {
   fs.mkdirSync(path.dirname(STATE_FILE), { recursive: true });
-  fs.writeFileSync(STATE_FILE, JSON.stringify({ sent: {} }, null, 2));
+  fs.writeFileSync(
+    STATE_FILE,
+    JSON.stringify({ sent: {}, sent_self: {} }, null, 2),
+  );
 }
 
 const client = new Client({
@@ -39,7 +48,11 @@ client.once("ready", () => {
   console.log("=".repeat(80));
   console.log("SENTINEL RUNNING");
   console.log("=".repeat(80));
-  dispatchLoop();
+  // TEMP (v1.7.0): dispatch de oportunidades regulares em standby.
+  // Só a notificação de imóveis próprios (dispatchSelfLoop) está ativa.
+  // Para reativar: descomente a linha abaixo.
+  // dispatchLoop();
+  dispatchSelfLoop();
 });
 
 // client.on("message", async (message) => {
@@ -63,33 +76,59 @@ client.on("auth_failure", (msg) => {
   console.log("=".repeat(80));
 });
 
-async function dispatchLoop() {
+async function dispatchOpportunities({
+  filepath,
+  stateKey,
+  destination,
+  prefix,
+}) {
   try {
+    if (!fs.existsSync(filepath)) return;
+
     const state = JSON.parse(fs.readFileSync(STATE_FILE));
-    const lines = fs.readFileSync(OPPORTUNITIES_FILE, "utf8").split("\n");
+    if (!state[stateKey]) state[stateKey] = {};
+
+    const lines = fs.readFileSync(filepath, "utf8").split("\n");
 
     for (const line of lines) {
       if (!line.trim()) continue;
 
       const opp = JSON.parse(line);
 
-      if (state.sent[opp.id]) continue;
+      if (state[stateKey][opp.id]) continue;
 
-      const msg = format(opp);
+      const msg = prefix ? `${prefix}\n\n${format(opp)}` : format(opp);
 
-      await client.sendMessage(GROUP_ID, msg);
-      console.log(`Sent: ${opp.id}`);
+      await client.sendMessage(destination, msg);
+      console.log(`Sent (${stateKey}): ${opp.id}`);
 
-      state.sent[opp.id] = true;
+      state[stateKey][opp.id] = true;
       fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
 
       await new Promise((resolve) => setTimeout(resolve, 2000));
     }
   } catch (error) {
-    console.error("Dispatch error:", error.message);
+    console.error(`Dispatch error (${stateKey}):`, error.message);
   }
+}
 
+async function dispatchLoop() {
+  await dispatchOpportunities({
+    filepath: OPPORTUNITIES_FILE,
+    stateKey: "sent",
+    destination: GROUP_ID,
+  });
   setTimeout(dispatchLoop, 5000);
+}
+
+async function dispatchSelfLoop() {
+  await dispatchOpportunities({
+    filepath: SELF_OPPORTUNITIES_FILE,
+    stateKey: "sent_self",
+    destination: PRIORITY_CONTACT_ID,
+    prefix: "⭐ *IMÓVEL PRÓPRIO*",
+  });
+  setTimeout(dispatchSelfLoop, 5000);
 }
 
 function format(o) {
