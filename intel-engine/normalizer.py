@@ -1,4 +1,5 @@
 import re
+
 import spacy
 
 nlp = spacy.load("pt_core_news_lg")
@@ -225,7 +226,7 @@ CONDOMINIUM = [
 
 
 class NormalizedAd:
-    def __init__(self, raw_text: str, intent: str, original_content):
+    def __init__(self, raw_text: str, intent: str, original_content: None):
         self.raw_text = raw_text
         self.intent = intent
         self.text = self._normalize_text(raw_text)
@@ -235,7 +236,7 @@ class NormalizedAd:
         self.price = None
         self.bedrooms = None
         self.area_m2 = None
-        self.original_content = original_content
+        self.original_content = original_content or None
         self.condominium = None
         self.nearbeach = False
         self.seafront = False
@@ -687,3 +688,11 @@ def run_normalizer(sellers, buyers):
         buyers_padronized.append(normalized_ad.normalize())
 
     return sellers_padronized, buyers_padronized
+
+
+def run_self_normalizer(self_ads: list[dict]) -> list:
+    normalized_ads = []
+    for ad in self_ads:
+        normalized_ad = NormalizedAd(ad["message"], "sell", ad)
+        normalized_ads.append(normalized_ad.normalize())
+    return normalized_ads
