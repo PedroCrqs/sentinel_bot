@@ -62,11 +62,10 @@ async function startBot() {
     await console.log("Starting WhatsApp client...");
     await client.initialize();
   } catch (err) {
-    await persistence.log(
-      "ERROR",
-      `Initialization failed: ${err.message}. Retrying in 30s...`,
+    console.error(
+      `[COLLECTOR] Initialization failed: ${err.message}. Retrying in 30s...`,
     );
-    setTimeout(startBot(), 30000);
+    setTimeout(startBot, 30000);
   }
 }
 
@@ -96,7 +95,7 @@ client.on("auth_failure", (msg) => {
   console.log("=".repeat(80));
   console.error("AUTH FAILURE:", msg);
   console.log("=".repeat(80));
-  setTimeout(startBot(), 30000);
+  setTimeout(startBot, 30000);
 });
 
 const normalizeText = (text) => {
