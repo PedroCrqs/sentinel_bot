@@ -5,6 +5,24 @@ Based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.7.1] - 2026-07-17
+
+### English
+
+#### Fixed
+
+- `wpp-collector/package.json` / `wpp-egress/package.json`: Updated `whatsapp-web.js` dependency to tracking fork (`github:lindionez/whatsapp-web.js#feat/fix-_serialized-id-fallback`). This handles the July 2026 WhatsApp Web infrastructure update that renamed internal message/contact serialized IDs from `_serialized` to `$1`, preventing immediate `TypeError` crashes across the collection and egress pipelines.
+
+---
+
+### Português
+
+#### Corrigido
+
+- `wpp-collector/package.json` / `wpp-egress/package.json`: Atualizada a dependência `whatsapp-web.js` para o fork de correção da comunidade (`github:lindionez/whatsapp-web.js#feat/fix-_serialized-id-fallback`). A alteração resolve o crash por `TypeError` causado pela mudança interna do WhatsApp Web (julho de 2026), que alterou a propriedade de IDs serializados de `_serialized` para `$1`, normalizando o pipeline de coleta e envio.
+
+---
+
 ## [1.7.0] - 2026-07-08
 
 ### English
