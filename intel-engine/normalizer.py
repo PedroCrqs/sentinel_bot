@@ -1,232 +1,30 @@
 import re
-
 import spacy
+import json
+import os
 
 nlp = spacy.load("pt_core_news_lg")
 
-sellers_padronized = []
-buyers_padronized = []
+# sellers_padronized = []
+# buyers_padronized = []
 
-PROPERTY_TYPE_MAP = {
-    "APARTAMENTO": ["apartamento", "apto", "ap", "apt", "Apartamento"],
-    "CASA": ["casa", "residencia", "residência", "Casa"],
-    "TERRENO": ["terreno", "lote"],
-    "COBERTURA": ["cobertura", "Cobertura", "cob", "Cob", "COB"],
-}
+CONFIG_PATH = os.path.join(os.path.dirname(__file__), "data", "entities.json")
 
-NEIGHBORHOODS = [
-    "recreio",
-    "barra da tijuca",
-    "barra olímpica",
-    "barra",
-    "jacarepaguá",
-    "vargem grande",
-    "vargem pequena",
-    "freguesia",
-    "ipanema",
-    "copacabana",
-    "centro da cidade",
-    "curicica",
-    "taquara",
-    "anil",
-    "pechincha",
-    "itanhangá",
-    "humaitá",
-    "flamengo",
-    "botafogo",
-    "são conrado",
-    "leblon",
-    "gávea",
-    "jardim botânico",
-    "leme",
-    "urca",
-    "catete",
-    "glória",
-    "laranjeiras",
-]
+# Carrega os dados do arquivo JSON
+with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+    config = json.load(f)
 
-NEIGHBORHOOD_ALIASES = {
-    "barra da tijuca": "BARRA",
-    "barra": "BARRA",
-    "barra olímpica": "BARRA OLIMPICA",
-    "jacarepaguá": "JACAREPAGUÁ",
-    "itanhangá": "ITANHANGÁ",
-    "humaitá": "HUMAITÁ",
-    "são conrado": "SÃO CONRADO",
-    "gávea": "GÁVEA",
-    "jardim botânico": "JARDIM BOTÂNICO",
-    "glória": "GLÓRIA",
-}
+PROPERTY_TYPE_MAP = config["PROPERTY_TYPE_MAP"]
+NEIGHBORHOODS = config["NEIGHBORHOODS"]
+NEIGHBORHOOD_ALIASES = config["NEIGHBORHOOD_ALIASES"]
+NEIGHBORHOOD_PARENT = config["NEIGHBORHOOD_PARENT"]
+ZONES = config["ZONES"]
+CONDOMINIUM = config["CONDOMINIUM"]
 
-NEIGHBORHOOD_PARENT = {
-    "barra bonita": "RECREIO",
-    "pontal oceanico": "RECREIO",
-    "zico": "RECREIO",
-    "cidade jardim": "BARRA OLIMPICA",
-}
-
-# Sub-bairros extraídos do NEIGHBORHOOD_PARENT — detectados separadamente
 SUB_NEIGHBORHOODS = list(NEIGHBORHOOD_PARENT.keys())
 
-ZONES = {
-    "ZONA SUDOESTE": {
-        "aliases": [
-            "zona sudoeste",
-            "z. sudoeste",
-            "zona oeste",
-            "z. oeste",
-        ],
-        "neighborhoods": [
-            "RECREIO",
-            "BARRA",
-            "BARRA OLIMPICA",
-            "JACAREPAGUÁ",
-            "FREGUESIA",
-            "CURICICA",
-            "TAQUARA",
-            "ANIL",
-            "PECHINCHA",
-            "ITANHANGÁ",
-            "VARGEM GRANDE",
-            "VARGEM PEQUENA",
-        ],
-    },
-    "ZONA SUL": {
-        "aliases": [
-            "zona sul",
-            "z. sul",
-            "zs",
-        ],
-        "neighborhoods": [
-            "IPANEMA",
-            "COPACABANA",
-            "HUMAITÁ",
-            "FLAMENGO",
-            "BOTAFOGO",
-            "SÃO CONRADO",
-            "LEBLON",
-            "LAGOA",
-            "GÁVEA",
-            "JARDIM BOTÂNICO",
-            "LEME",
-            "URCA",
-            "CATETE",
-            "GLÓRIA",
-            "LARANJEIRAS",
-        ],
-    },
-}
-
-
-CONDOMINIUM = [
-    "Acqua Marine",
-    "Alameda dos Jequitibás",
-    "Alfa Barra",
-    "Aloha",
-    "Alphaville",
-    "Alto Leblon",
-    "Americas Park",
-    "Art Life",
-    "Atlântico Golf",
-    "Atlântico Sul",
-    "Barra Bali",
-    "Barra Central Park",
-    "Barramares",
-    "Barra Summer Dreams",
-    "Barra Sunday",
-    "Península",
-    "Beauclair",
-    "Blue House",
-    "Blue Vision",
-    "Bora Bora Resort",
-    "Bosque da Freguesia",
-    "Bosque dos Esquilos",
-    "Bothanica Nature",
-    "Califórnia Coast",
-    "Casa Alta",
-    "Duet",
-    "Duo Residenziale",
-    "Estrelas",
-    "Floresta Park",
-    "Fontano",
-    "Four Seasons",
-    "Frames",
-    "Freedom",
-    "Gleba A",
-    "Gleba B",
-    "Gleba C",
-    "Grand Prix",
-    "Green Park",
-    "Green Place",
-    "Icono Parque",
-    "Itaúna Gold",
-    "Jardim Interlagos",
-    "Jardins",
-    "Joia da Barra",
-    "Le Monde",
-    "Le Parc",
-    "Liberty Green",
-    "Libertá",
-    "Life Resort",
-    "Liv Lifestyle",
-    "Luar do Pontal",
-    "Lume Barra Bonita",
-    "Lume Residencial",
-    "Maayan",
-    "Malibu",
-    "Mandala",
-    "Maui",
-    "Maramar",
-    "Marina Costabella",
-    "Mediterrâneo",
-    "MORADA DO SOL",
-    "MUDRA",
-    "Next",
-    "Niemeyer",
-    "Nova Barra",
-    "Nova Ipanema",
-    "Nova Sernambetiba",
-    "Novo Leblon",
-    "Ocean Breeze",
-    "Origami",
-    "Palais",
-    "Palm Springs",
-    "Park Premium",
-    "Pedra de Itaúna",
-    "Península",
-    "Planície",
-    "Playa",
-    "Portal do Parque",
-    "Príncipe de Mônaco",
-    "Recanto das Garças",
-    "Recanto do Pontal",
-    "Reserva Jardim",
-    "Reserva do Parque",
-    "Rio Mar",
-    "Riserva Golf",
-    "Riviera Del Sol",
-    "Royal Green",
-    "Santa Marina",
-    "Santa Mônica Special",
-    "Saint Vivant",
-    "Saint Tropez",
-    "Stories Residence",
-    "Sublime Max",
-    "Sunset",
-    "Terra Nossa",
-    "Terrazas",
-    "Varandas",
-    "Verano",
-    "Vitality Spa",
-    "Villa Blanca",
-    "Villas da Barra",
-    "Viverde",
-    "Wonderful",
-]
-
-
 class NormalizedAd:
-    def __init__(self, raw_text: str, intent: str, original_content: None):
+    def __init__(self, raw_text: str, intent: str, original_content: dict | None = None):
         self.raw_text = raw_text
         self.intent = intent
         self.text = self._normalize_text(raw_text)
@@ -679,6 +477,10 @@ class NormalizedAd:
 
 
 def run_normalizer(sellers, buyers):
+
+    sellers_padronized = []
+    buyers_padronized = []
+
     for seller in sellers:
         normalized_ad = NormalizedAd(seller.raw_message, "sell", seller.data)
         sellers_padronized.append(normalized_ad.normalize())

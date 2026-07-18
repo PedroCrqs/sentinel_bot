@@ -2,28 +2,28 @@ const fs = require("fs");
 const path = require("path");
 const qrcode = require("qrcode-terminal");
 const { Client, LocalAuth } = require("whatsapp-web.js");
+const { Pool } = require("pg");
+
+// Aponta para o arquivo .env na raiz do projeto
+require("dotenv").config({ path: path.resolve(__dirname, '../.env') });
+
+// Configuração do Pool de Conexão com o PostgreSQL
+const pool = new Pool({
+  host: process.env.DB_HOST || "localhost",
+  port: process.env.DB_PORT || 5432,
+  database: process.env.DB_NAME || "sentinel_db",
+  user: process.env.DB_USER || "postgres",
+  password: process.env.DB_PASSWORD,
+});
 
 const SESSION_PATH = path.join(__dirname, "session");
-const STATE_FILE = path.join(__dirname, "../data/state.json");
-const OPPORTUNITIES_FILE = path.join(__dirname, "../data/opportunities.jsonl");
-const SELF_OPPORTUNITIES_FILE = path.join(
-  __dirname,
-  "../data/self_opportunities.jsonl",
-);
+
 const GROUP_ID = "120363424642701935@g.us";
 // Imóveis próprios: notificação prioritária vai direto por DM, não pro grupo
 const PRIORITY_CONTACT_ID = "96654279573661@lid";
 
 if (!fs.existsSync(SESSION_PATH)) {
   fs.mkdirSync(SESSION_PATH, { recursive: true });
-}
-
-if (!fs.existsSync(STATE_FILE)) {
-  fs.mkdirSync(path.dirname(STATE_FILE), { recursive: true });
-  fs.writeFileSync(
-    STATE_FILE,
-    JSON.stringify({ sent: {}, sent_self: {} }, null, 2),
-  );
 }
 
 const client = new Client({
@@ -52,7 +52,9 @@ client.once("ready", () => {
   // Só a notificação de imóveis próprios (dispatchSelfLoop) está ativa.
   // Para reativar: descomente a linha abaixo.
   // dispatchLoop();
-  dispatchSelfLoop();
+  
+  // Novo loop de dispatch integrado ao PostgreSQL
+  dispatchDatabaseLoop();
 });
 
 // client.on("message", async (message) => {
@@ -76,59 +78,35 @@ client.on("auth_failure", (msg) => {
   console.log("=".repeat(80));
 });
 
-async function dispatchOpportunities({
-  filepath,
-  stateKey,
-  destination,
-  prefix,
-}) {
+async function dispatchDatabaseLoop() {
   try {
-    if (!fs.existsSync(filepath)) return;
+    // Busca até 5 oportunidades pendentes por vez no banco
+    const res = await pool.query(
+      "SELECT id, match_details FROM opportunities WHERE status = 'PENDING' ORDER BY created_at ASC LIMIT 5"
+    );
 
-    const state = JSON.parse(fs.readFileSync(STATE_FILE));
-    if (!state[stateKey]) state[stateKey] = {};
+    for (const row of res.rows) {
+      const opp = row.match_details;
+      
+      // Mantendo o prefixo e o destino do dispatchSelfLoop original
+      const prefix = "⭐ *IMÓVEL PRÓPRIO*";
+      const msg = `${prefix}\n\n${format(opp)}`;
 
-    const lines = fs.readFileSync(filepath, "utf8").split("\n");
+      await client.sendMessage(PRIORITY_CONTACT_ID, msg);
+      console.log(`Sent (db_self): ${row.id}`);
 
-    for (const line of lines) {
-      if (!line.trim()) continue;
+      // Atualiza o status no banco para 'SENT'
+      await pool.query("UPDATE opportunities SET status = 'SENT' WHERE id = $1", [row.id]);
 
-      const opp = JSON.parse(line);
-
-      if (state[stateKey][opp.id]) continue;
-
-      const msg = prefix ? `${prefix}\n\n${format(opp)}` : format(opp);
-
-      await client.sendMessage(destination, msg);
-      console.log(`Sent (${stateKey}): ${opp.id}`);
-
-      state[stateKey][opp.id] = true;
-      fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
-
+      // Pausa de 2 segundos entre envios, conforme o código original
       await new Promise((resolve) => setTimeout(resolve, 2000));
     }
   } catch (error) {
-    console.error(`Dispatch error (${stateKey}):`, error.message);
+    console.error(`Dispatch error (database):`, error.message);
   }
-}
 
-async function dispatchLoop() {
-  await dispatchOpportunities({
-    filepath: OPPORTUNITIES_FILE,
-    stateKey: "sent",
-    destination: GROUP_ID,
-  });
-  setTimeout(dispatchLoop, 5000);
-}
-
-async function dispatchSelfLoop() {
-  await dispatchOpportunities({
-    filepath: SELF_OPPORTUNITIES_FILE,
-    stateKey: "sent_self",
-    destination: PRIORITY_CONTACT_ID,
-    prefix: "⭐ *IMÓVEL PRÓPRIO*",
-  });
-  setTimeout(dispatchSelfLoop, 5000);
+  // Roda novamente a cada 5 segundos
+  setTimeout(dispatchDatabaseLoop, 5000);
 }
 
 function format(o) {

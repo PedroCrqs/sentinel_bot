@@ -5,6 +5,32 @@ Based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.8.0] - 2026-07-18
+
+### English
+
+#### Added
+- Migration of data persistence from flat files (`.jsonl`) to PostgreSQL database.
+- Implementation of batch processing (with `LIMIT`) in the analytical engine to prevent memory overflow.
+- Exception handling blocks (`try/except`) added to the main loop to ensure pipeline resilience.
+
+#### Changed
+- Refactored dispatch service (`wpp-egress`) to consume the opportunities table directly from PostgreSQL.
+
+---
+
+### Português
+
+#### Adicionado
+- Migração da persistência de arquivos flat (`.jsonl`) para banco de dados PostgreSQL.
+- Implementação de processamento em lotes (batch processing com `LIMIT`) no motor analítico para evitar estouro de memória.
+- Adição de blocos de tratamento de exceções (`try/except`) no loop principal para garantir a resiliência do pipeline.
+
+#### Alterado
+- Refatoração do serviço de despacho (`wpp-egress`) para consumir a tabela de oportunidades no PostgreSQL.
+
+---
+
 ## [1.7.1] - 2026-07-17
 
 ### English

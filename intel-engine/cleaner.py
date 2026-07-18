@@ -1,17 +1,26 @@
 import json
 import time
-import os
 import hashlib
 import re
 import unicodedata
-from classifier import classify_message
 
-MESSAGES_FILE = "../data/messages.jsonl"
-OPPORTUNITIES_FILE = "../data/opportunities.jsonl"
-SELF_OPPORTUNITIES_FILE = "../data/self_opportunities.jsonl"
-ENGINE_STATE_FILE = "../data/engine_state.json"
-DISPATCH_STATE_FILE = "../data/state.json"
+from pathlib import Path
+from classifier import Message
 
+# ==============================================================================
+# CONFIGURAÇÃO DE CAMINHOS
+# ==============================================================================
+BASE_DIR = Path(__file__).resolve().parent.parent
+
+MESSAGES_FILE = BASE_DIR / "data" / "messages.jsonl"
+OPPORTUNITIES_FILE = BASE_DIR / "data" / "opportunities.jsonl"
+SELF_OPPORTUNITIES_FILE = BASE_DIR / "data" / "self_opportunities.jsonl"
+ENGINE_STATE_FILE = BASE_DIR / "data" / "engine_state.json"
+DISPATCH_STATE_FILE = BASE_DIR / "data" / "state.json"
+
+# ==============================================================================
+# CONSTANTES DE TEMPO
+# ==============================================================================
 THREE_MONTHS = 7_776_000
 THIRTY_DAYS = 2_592_000
 FIFTEEN_DAYS = 1_296_000
@@ -30,10 +39,10 @@ def _compute_ad_hash(message_text: str) -> str:
     return hashlib.md5(_normalize_for_hash(message_text).encode()).hexdigest()
 
 
-def _load_jsonl(filepath: str):
+def _load_jsonl(filepath: Path):
     """Lê um .jsonl e retorna lista de (linha_raw, objeto_parsed). Ignora linhas inválidas."""
     results = []
-    with open(filepath, "r", encoding="utf-8") as f:
+    with filepath.open("r", encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if not line:
@@ -45,15 +54,15 @@ def _load_jsonl(filepath: str):
     return results
 
 
-def _write_jsonl(filepath: str, objects: list):
-    with open(filepath, "w", encoding="utf-8") as f:
+def _write_jsonl(filepath: Path, objects: list):
+    with filepath.open("w", encoding="utf-8") as f:
         for obj in objects:
             f.write(json.dumps(obj, ensure_ascii=False) + "\n")
 
 
 def sync_engine_state(kept_message_ids: list):
     try:
-        with open(ENGINE_STATE_FILE) as f:
+        with ENGINE_STATE_FILE.open(encoding="utf-8") as f:
             state = json.load(f)
     except Exception:
         return
@@ -61,27 +70,27 @@ def sync_engine_state(kept_message_ids: list):
     kept_id_set = set(kept_message_ids)
     state["seen_ids"] = [mid for mid in state.get("seen_ids", []) if mid in kept_id_set]
 
-    with open(ENGINE_STATE_FILE, "w") as f:
+    with ENGINE_STATE_FILE.open("w", encoding="utf-8") as f:
         json.dump(state, f)
 
 
 def sync_engine_state_hashes(kept_hashes: list):
     """Atualiza seen_hashes no engine_state para refletir o que realmente está no arquivo."""
     try:
-        with open(ENGINE_STATE_FILE) as f:
+        with ENGINE_STATE_FILE.open(encoding="utf-8") as f:
             state = json.load(f)
     except Exception:
         return
 
     state["seen_hashes"] = kept_hashes
 
-    with open(ENGINE_STATE_FILE, "w") as f:
+    with ENGINE_STATE_FILE.open("w", encoding="utf-8") as f:
         json.dump(state, f)
 
 
 def sync_dispatch_state(kept_opp_ids: list, state_key: str = "sent"):
     try:
-        with open(DISPATCH_STATE_FILE) as f:
+        with DISPATCH_STATE_FILE.open(encoding="utf-8") as f:
             state = json.load(f)
     except Exception:
         return
@@ -91,7 +100,7 @@ def sync_dispatch_state(kept_opp_ids: list, state_key: str = "sent"):
         oid: v for oid, v in state.get(state_key, {}).items() if oid in kept_set
     }
 
-    with open(DISPATCH_STATE_FILE, "w") as f:
+    with DISPATCH_STATE_FILE.open("w", encoding="utf-8") as f:
         json.dump(state, f, indent=2)
 
 
@@ -104,7 +113,7 @@ def clean_and_dedup_messages():
          - Se o ad_hash não existir no registro, recalcula a partir do texto.
          - Quando há duplicata de conteúdo, mantém a mais recente.
     """
-    if not os.path.exists(MESSAGES_FILE):
+    if not MESSAGES_FILE.exists():
         return
 
     now = int(time.time())
@@ -127,8 +136,8 @@ def clean_and_dedup_messages():
             removed_age += 1
             continue
 
-        classification = classify_message(obj)
-        if classification == "buying" and ts < cutoff_30d:
+        msg = Message(obj)
+        if msg.type == "buying" and ts < cutoff_30d:
             removed_buyer_age += 1
             continue
 
@@ -138,7 +147,7 @@ def clean_and_dedup_messages():
     for obj in candidates:
         mid = obj.get("message_id")
         if not mid:
-            by_id[id(obj)] = obj
+            by_id[str(id(obj))] = obj
             continue
         existing = by_id.get(mid)
         if existing is None or obj.get("timestamp", 0) > existing.get("timestamp", 0):
@@ -178,13 +187,13 @@ def clean_and_dedup_messages():
     )
 
 
-def _clean_and_dedup_opportunities_file(filepath: str, state_key: str, label: str):
+def _clean_and_dedup_opportunities_file(filepath: Path, state_key: str, label: str):
     """
     1. Remove oportunidades mais antigas que FIFTEEN_DAYS.
     2. Remove duplicatas por id (MD5 do par buyer+seller message_id).
        Quando há duplicata, mantém a mais recente (maior timestamp).
     """
-    if not os.path.exists(filepath):
+    if not filepath.exists():
         return
 
     now = int(time.time())
@@ -246,11 +255,11 @@ def reconcile_engine_state():
     existe no arquivo de mensagens — nunca maior.
     Cobre também o caso de messages.jsonl ausente ou corrompido.
     """
-    if not os.path.exists(ENGINE_STATE_FILE):
+    if not ENGINE_STATE_FILE.exists():
         return
 
-    if not os.path.exists(MESSAGES_FILE):
-        with open(ENGINE_STATE_FILE, "w") as f:
+    if not MESSAGES_FILE.exists():
+        with ENGINE_STATE_FILE.open("w", encoding="utf-8") as f:
             json.dump({"seen_ids": [], "seen_hashes": []}, f)
         print("[CLEANER] engine_state.json: zerado (messages.jsonl ausente).")
         return
@@ -262,7 +271,7 @@ def reconcile_engine_state():
     real_hashes = [obj.get("ad_hash") for _, obj in rows if obj and obj.get("ad_hash")]
 
     try:
-        with open(ENGINE_STATE_FILE) as f:
+        with ENGINE_STATE_FILE.open(encoding="utf-8") as f:
             state = json.load(f)
     except Exception:
         print("[CLEANER] engine_state.json: não foi possível ler, pulando.")
@@ -274,7 +283,7 @@ def reconcile_engine_state():
     state["seen_ids"] = real_ids
     state["seen_hashes"] = real_hashes
 
-    with open(ENGINE_STATE_FILE, "w") as f:
+    with ENGINE_STATE_FILE.open("w", encoding="utf-8") as f:
         json.dump(state, f)
 
     print(
@@ -291,11 +300,11 @@ def dedup_dispatch_state():
     Como 'sent' é um dict {opp_id: valor}, duplicatas de chave são impossíveis
     por natureza do JSON — mas verificamos integridade e removemos valores None/inválidos.
     """
-    if not os.path.exists(DISPATCH_STATE_FILE):
+    if not DISPATCH_STATE_FILE.exists():
         return
 
     try:
-        with open(DISPATCH_STATE_FILE) as f:
+        with DISPATCH_STATE_FILE.open(encoding="utf-8") as f:
             state = json.load(f)
     except Exception:
         print("[CLEANER] state.json: não foi possível ler, pulando.")
@@ -307,7 +316,7 @@ def dedup_dispatch_state():
 
     state["sent"] = cleaned
 
-    with open(DISPATCH_STATE_FILE, "w") as f:
+    with DISPATCH_STATE_FILE.open("w", encoding="utf-8") as f:
         json.dump(state, f, indent=2)
 
     print(f"[CLEANER] state.json: {removed} entradas inválidas/nulas removidas.")
