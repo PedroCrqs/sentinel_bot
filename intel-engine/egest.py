@@ -1,9 +1,10 @@
-import json
 import hashlib
-import time
+import json
 import os
+import time
 
 OPPORTUNITIES_FILE = "../data/opportunities.jsonl"
+SELF_OPPORTUNITIES_FILE = "../data/self_opportunities.jsonl"
 
 
 def make_id(opp):
@@ -14,12 +15,12 @@ def make_id(opp):
     return hashlib.md5(base.encode()).hexdigest()
 
 
-def _load_existing_ids() -> set:
+def _load_existing_ids(filepath: str) -> set:
     """Lê os IDs já presentes no arquivo para evitar duplicatas no append."""
     existing = set()
-    if not os.path.exists(OPPORTUNITIES_FILE):
+    if not os.path.exists(filepath):
         return existing
-    with open(OPPORTUNITIES_FILE, "r", encoding="utf-8") as f:
+    with open(filepath, "r", encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if not line:
@@ -34,11 +35,11 @@ def _load_existing_ids() -> set:
     return existing
 
 
-def export_opportunities(opportunities):
-    existing_ids = _load_existing_ids()
+def _export(opportunities, filepath: str) -> int:
+    existing_ids = _load_existing_ids(filepath)
 
     new_count = 0
-    with open(OPPORTUNITIES_FILE, "a", encoding="utf-8") as f:
+    with open(filepath, "a", encoding="utf-8") as f:
         for opp in opportunities:
             opp["id"] = make_id(opp)
             opp["timestamp"] = int(time.time())
@@ -51,3 +52,13 @@ def export_opportunities(opportunities):
             new_count += 1
 
     return new_count
+
+
+def export_opportunities(opportunities) -> int:
+    return _export(opportunities, OPPORTUNITIES_FILE)
+
+
+def export_self_opportunities(opportunities) -> int:
+    """Oportunidades envolvendo imóveis próprios — arquivo separado,
+    consumido pelo dispatch de DM prioritária em main.js."""
+    return _export(opportunities, SELF_OPPORTUNITIES_FILE)
