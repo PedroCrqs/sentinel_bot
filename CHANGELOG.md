@@ -5,6 +5,46 @@ Based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [2.0.0] - 2026-07-21
+
+### English
+
+#### Changed
+
+- **`wpp-collector`**: 
+- Message storage system that previously stored everything in a static .jsonl file now uses a PostgreSQL table within a Docker container.. 
+- Split the collector out of a single `main.js` into single-responsibility modules — `config.js` (env/session/shared state), `db.js` (PostgreSQL pool + state loading), `client.js` (WhatsApp client lifecycle), `ingest.js` (message normalization, hashing and persistence), and `main.js` (bootstrap only).
+- `client.js`: Now imports `ingest.js`'s exported `handleMessage` and attaches it to the `message` event itself, instead of `ingest.js` reaching into `client.js` to register the listener. This removes the business-logic module's dependency on the infrastructure module — `ingest.js` no longer needs to know a WhatsApp client exists.
+- `ingest.js`: Message handling extracted into a single exported `handleMessage(message)` function, decoupled from any specific event source.
+
+#### Fixed
+
+- `main.js`: `require("db.js")` (missing relative path) would have thrown `MODULE_NOT_FOUND` on boot.
+- `config.js`: Used `path` and `fs` without requiring them; exported nothing, leaving `SESSION_PATH`, `BLOCKED_IDS`, `knownIds`, and `lastSeenAds` unreachable from other modules.
+- `client.js` / `db.js`: Referenced `SESSION_PATH`, `loadStateFromDB`, `knownIds`, and `lastSeenAds` without importing them — would have crashed with `ReferenceError` on first use.
+- `main.js`: Message ingestion logic (hashing, deduplication, PostgreSQL insert) lived inline alongside the WhatsApp connection bootstrap; now isolated in `ingest.js`.
+
+---
+
+### Português
+
+#### Alterado
+
+- **`wpp-collector`**: 
+- Sistema de armazenamento de mensagens que antes armazenava tudo em um .jsonl estático, agora utiliza uma tabela no PostgreSQL dentro de um container Docker.
+- Divisão do collector, que estava em um único `main.js`, em módulos de responsabilidade única — `config.js` (env/sessão/estado compartilhado), `db.js` (pool PostgreSQL + carga de estado), `client.js` (ciclo de vida do client WhatsApp), `ingest.js` (normalização, hash e persistência de mensagens) e `main.js` (apenas bootstrap).
+- `client.js`: Agora importa o `handleMessage` exportado pelo `ingest.js` e o anexa ao evento `message` diretamente, em vez do `ingest.js` importar o `client.js` para registrar o listener. Isso remove a dependência do módulo de lógica de negócio sobre o módulo de infraestrutura — o `ingest.js` não precisa mais saber que existe um client de WhatsApp.
+- `ingest.js`: Lógica de processamento extraída para uma única função exportada `handleMessage(message)`, desacoplada de qualquer fonte de evento específica.
+
+#### Corrigido
+
+- `main.js`: `require("db.js")` (sem caminho relativo) causaria `MODULE_NOT_FOUND` na inicialização.
+- `config.js`: Usava `path` e `fs` sem importá-los; não exportava nada, deixando `SESSION_PATH`, `BLOCKED_IDS`, `knownIds` e `lastSeenAds` inacessíveis para os demais módulos.
+- `client.js` / `db.js`: Referenciavam `SESSION_PATH`, `loadStateFromDB`, `knownIds` e `lastSeenAds` sem importá-los — quebraria com `ReferenceError` no primeiro uso.
+- `main.js`: Lógica de ingestão de mensagens (hash, deduplicação, insert no PostgreSQL) estava misturada com o bootstrap de conexão do WhatsApp; agora isolada em `ingest.js`.
+
+---
+
 ## [1.8.0] - 2026-07-18
 
 ### English
