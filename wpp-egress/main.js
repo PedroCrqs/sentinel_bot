@@ -9,11 +9,9 @@ require("dotenv").config({ path: path.resolve(__dirname, '../.env') });
 
 // Configuração do Pool de Conexão com o PostgreSQL
 const pool = new Pool({
-  host: process.env.DB_HOST || "localhost",
-  port: process.env.DB_PORT || 5432,
-  database: process.env.DB_NAME || "sentinel_db",
-  user: process.env.DB_USER || "postgres",
-  password: process.env.DB_PASSWORD,
+  connectionString:
+    process.env.DATABASE_URL ||
+    "postgresql://postgres:postgres@localhost:5432/imoveis",
 });
 
 const SESSION_PATH = path.join(__dirname, "session");
@@ -82,7 +80,7 @@ async function dispatchDatabaseLoop() {
   try {
     // Busca até 5 oportunidades pendentes por vez no banco
     const res = await pool.query(
-      "SELECT id, match_details FROM opportunities WHERE status = 'PENDING' ORDER BY created_at ASC LIMIT 5"
+      "SELECT opportunity_id, match_details FROM opportunities WHERE dispatch_status = 'PENDING' ORDER BY created_at ASC LIMIT 5"
     );
 
     for (const row of res.rows) {
@@ -92,12 +90,13 @@ async function dispatchDatabaseLoop() {
       const prefix = "⭐ *IMÓVEL PRÓPRIO*";
       const msg = `${prefix}\n\n${format(opp)}`;
 
-      await client.sendMessage(PRIORITY_CONTACT_ID, msg);
-      console.log(`Sent (db_self): ${row.id}`);
+      await client.sendMessage(GROUP_ID, msg);
+      console.log(`Sent (db_self): ${row.opportunity_id}`); 
 
-      // Atualiza o status no banco para 'SENT'
-      await pool.query("UPDATE opportunities SET status = 'SENT' WHERE id = $1", [row.id]);
-
+      await pool.query(
+      "UPDATE opportunities SET dispatch_status = 'SENT' WHERE opportunity_id = $1",
+     [row.opportunity_id]
+);
       // Pausa de 2 segundos entre envios, conforme o código original
       await new Promise((resolve) => setTimeout(resolve, 2000));
     }

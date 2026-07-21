@@ -19,7 +19,6 @@ from database import (
     save_opportunities
 )
 
-from egest import export_opportunities, export_self_opportunities
 from matcher import get_opportunity
 from normalizer import run_normalizer, run_self_normalizer
 

@@ -6,12 +6,8 @@ from dotenv import load_dotenv, find_dotenv
 
 load_dotenv(find_dotenv())
 
-# Configuração do Banco
-DB_NAME = os.getenv("DB_NAME", "sentinel_db")
-DB_USER = os.getenv("DB_USER", "postgres")
-DB_PASSWORD = os.getenv("DB_PASSWORD", "admin")
-DB_HOST = os.getenv("DB_HOST", "localhost")
-DB_PORT = os.getenv("DB_PORT", "5432")
+# Usa a mesma DATABASE_URL que o resto do projeto (main.js, database.py)
+DATABASE_URL = os.environ["DATABASE_URL"]
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 JSONL_PATH = BASE_DIR / "data" / "messages.jsonl"
@@ -22,9 +18,7 @@ def migrate():
         return
 
     print("Conectando ao PostgreSQL...")
-    conn = psycopg2.connect(
-        dbname=DB_NAME, user=DB_USER, password=DB_PASSWORD, host=DB_HOST, port=DB_PORT
-    )
+    conn = psycopg2.connect(DATABASE_URL)
     cursor = conn.cursor()
 
     # Query de inserção. O 'ON CONFLICT DO NOTHING' evita que a mesma mensagem seja duplicada
@@ -36,14 +30,17 @@ def migrate():
         ON CONFLICT (message_id) DO NOTHING;
     """
 
-    count = 0
+    inserted = 0
+    skipped = 0
+    errors = 0
+
     print("Iniciando leitura do arquivo messages.jsonl...")
-    
+
     with open(JSONL_PATH, "r", encoding="utf-8") as f:
-        for line in f:
+        for line_number, line in enumerate(f, start=1):
             if not line.strip():
                 continue
-            
+
             try:
                 data = json.loads(line)
                 cursor.execute(query, (
@@ -57,17 +54,29 @@ def migrate():
                     data.get("ad_hash"),
                     data.get("timestamp")
                 ))
-                count += 1
-            except Exception as e:
-                print(f"Erro ao processar linha: {e}")
+                # rowcount = 1 se inseriu de fato, 0 se ON CONFLICT DO NOTHING pulou
+                if cursor.rowcount > 0:
+                    inserted += 1
+                else:
+                    skipped += 1
 
-    # Salva no banco de forma atômica
-    conn.commit()
+                # Commit por linha: garante que uma falha isolada não
+                # deixa a transação "abortada" para as linhas seguintes.
+                conn.commit()
+
+            except Exception as e:
+                errors += 1
+                print(f"Erro na linha {line_number}: {e}")
+                conn.rollback()  # limpa o estado da transação antes de seguir
+
     cursor.close()
     conn.close()
-    
+
     print(f"==================================================")
-    print(f"🚀 Migração Concluída! {count} mensagens injetadas na fila.")
+    print(f"🚀 Migração concluída!")
+    print(f"   Inseridas: {inserted}")
+    print(f"   Já existentes (puladas): {skipped}")
+    print(f"   Erros: {errors}")
     print(f"==================================================")
 
 if __name__ == "__main__":

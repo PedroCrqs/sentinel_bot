@@ -1,4 +1,5 @@
 import hashlib
+import json
 import os
 import psycopg2
 from psycopg2.pool import SimpleConnectionPool
@@ -63,6 +64,9 @@ def get_property_details() -> list[dict]:
     """
     Mantém a mesma inteligência do seu pipeline original:
     Retorna os imóveis próprios simulando a 'forma' de um message_data vindo do WhatsApp.
+
+    IMPORTANTE: inclui imovel_id para que o matcher/normalizer consigam
+    propagar o ImovelID real até a tabela opportunities.matched_imovel_id.
     """
     properties_available = get_available_properties()
     properties_details = []
@@ -78,6 +82,7 @@ def get_property_details() -> list[dict]:
                 "message": description,
                 "author_name": "Majesto",
                 "author_phone": None,
+                "imovel_id": prop.get("imovelid"),  # preserva o ID real do imóvel
             }
         )
     return properties_details
@@ -110,7 +115,6 @@ def update_message_status(message_id: str, status: str, normalized_data: dict | 
     Atualiza o status da mensagem e salva o JSON extraído pelo normalizer.
     Substitui o antigo engine_state.json.
     """
-    import json
     from datetime import datetime, date
 
     query = """
@@ -143,23 +147,42 @@ def save_opportunities(opportunities_list: list[dict]):
     """
     Salva os matches gerados pelo matcher.py na tabela transacional.
     Substitui o antigo self_opportunities.jsonl.
+
+    Cada item de opportunities_list tem o formato:
+        {"buyer": {...}, "seller": {...}, "score": int}
+    (retornado por matcher.get_opportunity)
+
+    matched_imovel_id vem de seller["original_content"]["imovel_id"] --
+    esse campo é propagado desde get_property_details() (database.py)
+    através de run_self_normalizer() (normalizer.py), que guarda o dict
+    original inteiro dentro de "original_content".
     """
     query = """
-        INSERT INTO opportunities (buyer_message_id, matched_imovel_id, match_score, dispatch_status)
-        VALUES (%s, %s, %s, 'QUEUED');
+        INSERT INTO opportunities
+            (buyer_message_id, seller_message_id, matched_imovel_id,
+             match_score, match_details, dispatch_status)
+        VALUES (%s, %s, %s, %s, %s, 'PENDING')
+        ON CONFLICT (buyer_message_id, seller_message_id) DO NOTHING;
     """
-    
+
     conn = None
     try:
         conn = get_db_connection()
         with conn:
             with conn.cursor() as cursor:
                 for opp in opportunities_list:
-                    # Mapeia as chaves que seu matcher.py gera para as colunas do Postgres
+                    buyer_message_id = opp["buyer"]["original_content"]["message_id"]
+                    seller_message_id = opp["seller"]["original_content"]["message_id"]
+                    matched_imovel_id = opp["seller"]["original_content"].get("imovel_id")
+                    match_score = opp["score"]
+                    match_details = json.dumps(opp)
+
                     cursor.execute(query, (
-                        opp.get("buyer_message_id"),
-                        opp.get("imovel_id"),
-                        opp.get("score")
+                        buyer_message_id,
+                        seller_message_id,
+                        matched_imovel_id,
+                        match_score,
+                        match_details,
                     ))
             conn.commit()
     except Exception as e:
