@@ -11,7 +11,7 @@ const pool = new Pool({
 // INICIALIZAÇÃO DO ESTADO (Carrega histórico do PostgreSQL)
 // ============================================================================
 async function loadStateFromDB() {
-  console.log("[DB] Carregando histórico de mensagens do PostgreSQL...");
+  console.log("[DB] Loading PostgreSQL...");
   try {
     const res = await pool.query(
       "SELECT message_id, ad_hash, timestamp FROM raw_messages"
@@ -30,10 +30,10 @@ async function loadStateFromDB() {
       }
     });
     console.log(
-      `[DB] Histórico carregado. ${knownIds.size} mensagens em cache para deduplicação.`
+      `[DB] Story donwloaded. ${knownIds.size} messages in cache for deduplication.`
     );
   } catch (error) {
-    console.error("[DB ERRO] Falha ao carregar estado inicial:", error.message);
+    console.error("[DB ERROR] Failed to load state from PostgreSQL:", error.message);
   }
 }
 
