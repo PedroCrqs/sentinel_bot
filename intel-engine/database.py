@@ -1,28 +1,39 @@
 import hashlib
 import os
 import psycopg2
+from psycopg2.pool import SimpleConnectionPool
 
 from psycopg2.extras import RealDictCursor
 from dotenv import load_dotenv, find_dotenv
 
 load_dotenv(find_dotenv())
 
-# Configuração de Conexão via Variáveis de Ambiente
-DB_NAME = os.getenv("DB_NAME", "sentinel_db")
-DB_USER = os.getenv("DB_USER", "postgres")
-DB_PASSWORD = os.getenv("DB_PASSWORD", "admin")
+# Configuração de Conexão via Variáveis de Ambiente (ajustado para o .env)
+DB_NAME = os.getenv("POSTGRES_DB", "imoveis")
+DB_USER = os.getenv("POSTGRES_USER", "imoveis_app")
+DB_PASSWORD = os.getenv("POSTGRES_PASSWORD", "")
 DB_HOST = os.getenv("DB_HOST", "localhost")
 DB_PORT = os.getenv("DB_PORT", "5432")
 
+# Inicialização do Pool de Conexões (min=1, max=10 conexões por exemplo)
+db_pool = SimpleConnectionPool(
+    minconn=1,
+    maxconn=10,
+    dbname=DB_NAME,
+    user=DB_USER,
+    password=DB_PASSWORD,
+    host=DB_HOST,
+    port=DB_PORT
+)
+
 def get_db_connection():
-    """Garante uma nova conexão limpa com o PostgreSQL."""
-    return psycopg2.connect(
-        dbname=DB_NAME,
-        user=DB_USER,
-        password=DB_PASSWORD,
-        host=DB_HOST,
-        port=DB_PORT
-    )
+    """Obtém uma conexão limpa a partir do pool."""
+    return db_pool.getconn()
+
+def release_db_connection(conn):
+    """Devolve a conexão para o pool."""
+    if conn:
+        db_pool.putconn(conn)
 
 
 # ==============================================================================
@@ -32,9 +43,11 @@ def get_db_connection():
 def get_available_properties() -> list[dict]:
     """Busca imóveis com status 'Disponível' direto do PostgreSQL."""
     query = "SELECT * FROM Imoveis WHERE ImovelStatus = 'Disponível';"
+    conn = None
     
     try:
-        with get_db_connection() as conn:
+        conn = get_db_connection()
+        with conn:
             # RealDictCursor faz o psycopg2 retornar dicionários Python nativos
             with conn.cursor(cursor_factory=RealDictCursor) as cursor:
                 cursor.execute(query)
@@ -42,6 +55,8 @@ def get_available_properties() -> list[dict]:
     except Exception as e:
         print(f"[ERRO BANCO] Falha ao buscar imóveis disponíveis: {e}")
         return []
+    finally:
+        release_db_connection(conn)
 
 
 def get_property_details() -> list[dict]:
@@ -75,15 +90,19 @@ def get_property_details() -> list[dict]:
 def get_pending_messages() -> list[dict]:
     """Busca todas as mensagens enviadas pelo WhatsApp que ainda estão pendentes."""
     query = "SELECT * FROM raw_messages WHERE status = 'PENDING' ORDER BY timestamp ASC LIMIT 50;"
+    conn = None
     
     try:
-        with get_db_connection() as conn:
+        conn = get_db_connection()
+        with conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cursor:
                 cursor.execute(query)
                 return [dict(row) for row in cursor.fetchall()]
     except Exception as e:
         print(f"[ERRO BANCO] Falha ao buscar mensagens pendentes: {e}")
         return []
+    finally:
+        release_db_connection(conn)
 
 
 def update_message_status(message_id: str, status: str, normalized_data: dict | None = None):
@@ -105,8 +124,10 @@ def update_message_status(message_id: str, status: str, normalized_data: dict | 
             return obj.isoformat()
         raise TypeError(f"Tipo {type(obj)} não é serializável")
 
+    conn = None
     try:
-        with get_db_connection() as conn:
+        conn = get_db_connection()
+        with conn:
             with conn.cursor() as cursor:
                 # O parâmetro default=json_serial entra em ação
                 json_data = json.dumps(normalized_data, default=json_serial) if normalized_data else None
@@ -114,6 +135,8 @@ def update_message_status(message_id: str, status: str, normalized_data: dict | 
             conn.commit()
     except Exception as e:
         print(f"[ERRO BANCO] Falha ao atualizar status da mensagem {message_id}: {e}")
+    finally:
+        release_db_connection(conn)
 
 
 def save_opportunities(opportunities_list: list[dict]):
@@ -126,8 +149,10 @@ def save_opportunities(opportunities_list: list[dict]):
         VALUES (%s, %s, %s, 'QUEUED');
     """
     
+    conn = None
     try:
-        with get_db_connection() as conn:
+        conn = get_db_connection()
+        with conn:
             with conn.cursor() as cursor:
                 for opp in opportunities_list:
                     # Mapeia as chaves que seu matcher.py gera para as colunas do Postgres
@@ -139,3 +164,5 @@ def save_opportunities(opportunities_list: list[dict]):
             conn.commit()
     except Exception as e:
         print(f"[ERRO BANCO] Falha ao salvar lote de oportunidades: {e}")
+    finally:
+        release_db_connection(conn)

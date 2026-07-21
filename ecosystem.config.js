@@ -32,7 +32,7 @@ module.exports = {
     {
       name: "sentinel-engine", // classificação, normalização, matching, cleanup periódico
       script: "engine.py",
-      interpreter: path.join(__dirname, "intel-engine", "venv", "bin", "python"),
+      interpreter: path.join(__dirname, "intel-engine", ".venv", "bin", "python"),
       cwd: path.join(__dirname, "intel-engine"),
       env: {
         NODE_ENV: "production"
