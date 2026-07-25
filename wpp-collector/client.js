@@ -6,6 +6,7 @@ const qrcode = require("qrcode-terminal");
 const { SESSION_PATH } = require("./config");
 const { loadStateFromDB } = require("./db");
 const { handleMessage } = require("./ingest");
+const { initRabbitMQ } = require("./rabbitmq");
 
 const client = new Client({
   authStrategy: new LocalAuth({ dataPath: SESSION_PATH }),
@@ -31,6 +32,7 @@ const client = new Client({
 async function startBot() {
   try {
     await loadStateFromDB(); // Carrega o estado ANTES de ligar o WhatsApp
+    await initRabbitMQ(); // Inicia o RabbitMQ
     console.log("Starting WhatsApp client...");
     await client.initialize();
   } catch (err) {

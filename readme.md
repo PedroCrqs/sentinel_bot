@@ -113,9 +113,9 @@ Pontos importantes:
 
 O projeto tem dois mecanismos de bloqueio, com propósitos distintos — não confundir um com o outro:
 
-| Mecanismo | Onde | Quando age | Efeito |
-|---|---|---|---|
-| `BLOCKED_IDS` | `wpp-collector/main.js` | No momento da captura | Mensagens do usuário nunca chegam a ser gravadas em `messages.jsonl` |
+| Mecanismo                          | Onde                           | Quando age                                     | Efeito                                                                                                 |
+| ---------------------------------- | ------------------------------ | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `BLOCKED_IDS`                    | `wpp-collector/main.js`      | No momento da captura                          | Mensagens do usuário nunca chegam a ser gravadas em`messages.jsonl`                                 |
 | `BLOCKED_ID` + `purge_user.py` | `intel-engine/purge_user.py` | Sob demanda, manual (`python purge_user.py`) | Remove retroativamente tudo que já foi gravado (mensagens e oportunidades) de um usuário específico |
 
 Se quer impedir a captura de um usuário dali pra frente, adicione o ID em `BLOCKED_IDS` (`wpp-collector/main.js`) e reinicie o `sentinel-collector`. Se quer apagar o que já foi coletado dele, rode `purge_user.py` com o ID em `BLOCKED_ID`.
@@ -207,15 +207,15 @@ sentinel_bot/
 
 Veja o [CHANGELOG](CHANGELOG.md) para o histórico completo de versões.
 
-| Versão | Destaque |
-|--------|----------|
-| v1.7.0 | Priorização de imóveis próprios (`database.py`), cleaner integrado ao engine, deploy via pm2 com 3 processos independentes |
-| v1.6.2 | Correção de race condition no engine |
-| v1.6.0 | Pipeline de deduplicação completo |
-| v1.3.0 | Zone matching, sun_type, seafront e normalização |
-| v1.2.0 | Dados e estrutura de cleaner |
-| v1.1.0 | Matcher aprimorado |
-| v1.0.0 | Primeiro release estável |
+| Versão | Destaque                                                                                                                         |
+| ------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| v1.7.0  | Priorização de imóveis próprios (`database.py`), cleaner integrado ao engine, deploy via pm2 com 3 processos independentes |
+| v1.6.2  | Correção de race condition no engine                                                                                           |
+| v1.6.0  | Pipeline de deduplicação completo                                                                                              |
+| v1.3.0  | Zone matching, sun_type, seafront e normalização                                                                               |
+| v1.2.0  | Dados e estrutura de cleaner                                                                                                     |
+| v1.1.0  | Matcher aprimorado                                                                                                               |
+| v1.0.0  | Primeiro release estável                                                                                                        |
 
 ---
 

@@ -3,14 +3,18 @@ import json
 import os
 import psycopg2
 import time
+from pathlib import Path
+
 from psycopg2.pool import SimpleConnectionPool
 
 from psycopg2.extras import RealDictCursor
-from dotenv import load_dotenv, find_dotenv
+from dotenv import load_dotenv
 
-load_dotenv(find_dotenv())
+# FORÇA A LEITURA DO .ENV NA RAIZ DO PROJETO
+env_path = Path(__file__).resolve().parent.parent / ".env"
+load_dotenv(env_path)
 
-# Configuração de Conexão via Variáveis de Ambiente (ajustado para o .env)
+# Configuração de Conexão via Variáveis de Ambiente
 DB_NAME = os.getenv("POSTGRES_DB", "imoveis")
 DB_USER = os.getenv("POSTGRES_USER", "imoveis_app")
 DB_PASSWORD = os.getenv("POSTGRES_PASSWORD", "")
@@ -155,26 +159,23 @@ def update_message_status(message_id: str, status: str, normalized_data: dict | 
         release_db_connection(conn)
 
 
-def save_opportunities(opportunities_list: list[dict]):
-    """
-    Salva os matches gerados pelo Neo4j na tabela transacional.
-    Lê o formato simplificado e direto gerado pelo Cypher.
-    """
+def save_opportunities(opportunities_list: list[dict]) -> list[int]:
+    """Salva os matches gerados e retorna os IDs das novas oportunidades."""
     query = """
         INSERT INTO opportunities
             (buyer_message_id, seller_message_id, matched_imovel_id,
              match_score, match_details, dispatch_status)
         VALUES (%s, %s, %s, %s, %s, 'PENDING')
-        ON CONFLICT (buyer_message_id, seller_message_id) DO NOTHING;
+        ON CONFLICT (buyer_message_id, seller_message_id) DO NOTHING
+        RETURNING opportunity_id;
     """
-
+    inserted_ids = []
     conn = None
     try:
         conn = get_db_connection()
         with conn:
             with conn.cursor() as cursor:
                 for opp in opportunities_list:
-                    # Garantir que a query Cypher no neo4j_client.py retorne estes IDs no dict!
                     buyer_msg_id = opp.get("buyer_message_id")
                     seller_msg_id = opp.get("seller_message_id")
                     matched_imovel_id = opp.get("matched_imovel_id") 
@@ -182,15 +183,36 @@ def save_opportunities(opportunities_list: list[dict]):
                     match_details = json.dumps(opp)
 
                     cursor.execute(query, (
-                        buyer_msg_id,
-                        seller_msg_id,
-                        matched_imovel_id,
-                        match_score,
-                        match_details,
+                        buyer_msg_id, seller_msg_id, matched_imovel_id,
+                        match_score, match_details,
                     ))
+                    
+                    # Pega o ID gerado pelo banco se a inserção ocorreu (ignora conflitos)
+                    row = cursor.fetchone()
+                    if row:
+                        inserted_ids.append(row[0])
             conn.commit()
+        return inserted_ids
     except Exception as e:
-        print(f"[ERRO BANCO] Falha ao salvar lote de oportunidades: {e}")
+        print(f"[ERRO BANCO] Falha ao salvar oportunidades: {e}")
+        return []
     finally:
         release_db_connection(conn)
-        
+
+
+def get_message_by_id(message_id: str) -> dict | None:
+    """Busca uma única mensagem no banco pelo ID enviado pelo RabbitMQ."""
+    query = "SELECT * FROM raw_messages WHERE message_id = %s;"
+    conn = None
+    try:
+        conn = get_db_connection()
+        with conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+                cursor.execute(query, (message_id,))
+                row = cursor.fetchone()
+                return dict(row) if row else None
+    except Exception as e:
+        print(f"[ERRO BANCO] Falha ao buscar mensagem {message_id}: {e}")
+        return None
+    finally:
+        release_db_connection(conn)

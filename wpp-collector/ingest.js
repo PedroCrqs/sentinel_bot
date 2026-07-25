@@ -4,6 +4,7 @@
 const crypto = require("crypto");
 const { pool } = require("./db");
 const { BLOCKED_IDS, DEDUP_WINDOW, knownIds, lastSeenAds } = require("./config");
+const { publishRawMessageEvent } = require("./rabbitmq");
 
 const normalizeText = (text) => {
   return text
@@ -81,6 +82,9 @@ async function handleMessage(message) {
     // Atualiza o cache em memória após salvar com sucesso
     knownIds.add(payload.message_id);
     lastSeenAds.set(adHash, payload.timestamp);
+
+    // Publica o evento no RabbitMQ
+    publishRawMessageEvent(payload.message_id);
 
     console.log(
       `[POSTGRES] Ingerido -> ${payload.author_name}: ${payload.message.substring(0, 50)}...`
