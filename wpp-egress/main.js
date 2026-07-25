@@ -109,96 +109,24 @@ async function dispatchDatabaseLoop() {
 }
 
 function format(o) {
-  const buyer = o.buyer.original_content;
-  const seller = o.seller.original_content;
+  // A estrutura 'o' agora reflete o retorno do Cypher salvo na coluna match_details
+  const buyer = o.buyer || {};
+  const seller = o.seller || {};
 
-  const formatPrice = (price) => {
-    if (!price) return "Não informado";
-    return `R$ ${price.toLocaleString("pt-BR")}`;
-  };
-
-  const formatArea = (area) => {
-    if (!area) return "";
-    return `${area}m²`;
-  };
-
-  const formatBedrooms = (bedrooms) => {
-    if (!bedrooms) return "";
-    return `${bedrooms} quarto${bedrooms > 1 ? "s" : ""}`;
-  };
-
-  const formatNeighborhood = (neighborhoods, subNeighborhood) => {
-    if (!neighborhoods || neighborhoods.length === 0) return "Não informado";
-    if (subNeighborhood) {
-      const parent = neighborhoods.find((n) => n !== subNeighborhood);
-      return parent ? `${parent} › ${subNeighborhood}` : subNeighborhood;
-    }
-    return neighborhoods.join(", ");
-  };
-
-  const formatCondominium = (condominium) => {
-    if (!condominium) return null;
-    if (Array.isArray(condominium)) {
-      return condominium.length > 0 ? condominium.join(", ") : null;
-    }
-    return condominium;
-  };
-
-  let message = `🔥 *OPORTUNIDADE* | Score: ${o.score}\n`;
+  let message = `🔥 *OPORTUNIDADE* | Score: ${o.score || 0}\n`;
   message += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n`;
 
   message += `👤 *COMPRADOR*\n`;
-  message += `Corretor: ${buyer.author_name}\n`;
-  message += `Telefone: ${buyer.author_phone || "Não informado"}\n`;
-  message += `📍 ${formatNeighborhood(o.buyer.neighborhood, o.buyer.sub_neighborhood)}\n`;
-  message += `💰 Até ${formatPrice(o.buyer.price)}\n`;
-
-  const buyerDetails = [];
-  if (o.buyer.bedrooms) buyerDetails.push(formatBedrooms(o.buyer.bedrooms));
-  if (o.buyer.area_m2) buyerDetails.push(formatArea(o.buyer.area_m2));
-  if (o.buyer.property_type) buyerDetails.push(o.buyer.property_type);
-  if (buyerDetails.length > 0) {
-    message += `🏠 ${buyerDetails.join(" • ")}\n`;
-  }
-
-  const buyerCond = formatCondominium(o.buyer.condominium);
-  if (buyerCond) message += `🏘️ Cond: ${buyerCond}\n`;
-  if (o.buyer.nearbeach) message += `🌊 Próximo à praia\n`;
-  if (o.buyer.seafront) message += `🏖️ Frente mar\n`;
-  if (o.buyer.sun_type)
-    message += `☀️ Sol: ${o.buyer.sun_type.charAt(0) + o.buyer.sun_type.slice(1).toLowerCase()}\n`;
-  if (o.buyer.parking_spots)
-    message += `🚗 ${o.buyer.parking_spots} vaga${o.buyer.parking_spots > 1 ? "s" : ""}\n`;
-  if (o.buyer.zone) message += `🗺️ Zona: ${o.buyer.zone}\n`;
-
-  message += `\nTexto original:\n_${o.buyer.raw_text}_\n`;
+  message += `Nome: ${buyer.name || "Não informado"}\n`;
+  message += `Telefone: ${buyer.phone || "Não informado"}\n`;
+  message += `\nTexto original:\n_${buyer.raw_text || "Sem texto"}_\n`;
 
   message += `\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n`;
 
   message += `🏢 *VENDEDOR*\n`;
-  message += `Corretor: ${seller.author_name}\n`;
-  message += `Telefone: ${seller.author_phone || "Não informado"}\n`;
-  message += `📍 ${formatNeighborhood(o.seller.neighborhood, o.seller.sub_neighborhood)}\n`;
-  message += `💰 ${formatPrice(o.seller.price)}\n`;
-
-  const sellerDetails = [];
-  if (o.seller.bedrooms) sellerDetails.push(formatBedrooms(o.seller.bedrooms));
-  if (o.seller.area_m2) sellerDetails.push(formatArea(o.seller.area_m2));
-  if (o.seller.property_type) sellerDetails.push(o.seller.property_type);
-  if (sellerDetails.length > 0) {
-    message += `🏠 ${sellerDetails.join(" • ")}\n`;
-  }
-
-  const sellerCond = formatCondominium(o.seller.condominium);
-  if (sellerCond) message += `🏘️ Cond: ${sellerCond}\n`;
-  if (o.seller.nearbeach) message += `🌊 Próximo à praia\n`;
-  if (o.seller.seafront) message += `🏖️ Frente mar\n`;
-  if (o.seller.sun_type)
-    message += `☀️ Sol: ${o.seller.sun_type.charAt(0) + o.seller.sun_type.slice(1).toLowerCase()}\n`;
-  if (o.seller.parking_spots)
-    message += `🚗 ${o.seller.parking_spots} vaga${o.seller.parking_spots > 1 ? "s" : ""}\n`;
-
-  message += `\nTexto original:\n_${o.seller.raw_text}_`;
+  message += `Nome: ${seller.name || "Não informado"}\n`;
+  message += `Telefone: ${seller.phone || "Não informado"}\n`;
+  message += `\nTexto original:\n_${seller.raw_text || "Sem texto"}_`;
 
   return message;
 }

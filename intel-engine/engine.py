@@ -1,16 +1,10 @@
-import json
 import time
 
 from pathlib import Path
 
 from classifier import run_classifier
-from cleaner import (
-    clean_and_dedup_messages,
-    clean_and_dedup_opportunities,
-    clean_and_dedup_self_opportunities,
-    dedup_dispatch_state,
-    reconcile_engine_state,
-)
+from normalizer import run_normalizer
+from graphs.neo4j_client import GraphClient
 
 from database import (
     get_pending_messages, 
@@ -19,88 +13,80 @@ from database import (
     save_opportunities
 )
 
-from matcher import get_opportunity
-from normalizer import run_normalizer, run_self_normalizer
-
-from graphs.neo4j_client import GraphClient
+# Agora importamos APENAS as novas funções de limpeza de banco
+from cleaner import purge_old_data_neo4j, purge_old_data_sql
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-
-# Intervalo entre execuções do cleaner. Não roda a cada iteração do loop
-# (a cada 3s) porque cleaner.py reescreve os .jsonl inteiros — caro demais
-# pra rodar com essa frequência.
-CLEANUP_INTERVAL_SECONDS = 3600  # 1 hora
-
+CLEANUP_INTERVAL_SECONDS = 3600
 
 def run_cleanup():
-    print(f"[ENGINE] Rodando limpeza periódica ({time.strftime('%Y-%m-%d %H:%M:%S')})")
-    clean_and_dedup_messages()
-    clean_and_dedup_opportunities()
-    clean_and_dedup_self_opportunities()
-    reconcile_engine_state()
-    dedup_dispatch_state()
-
+    print(f"[ENGINE] Rodando limpeza periódica de bancos de dados ({time.strftime('%Y-%m-%d %H:%M:%S')})")
+    
+    # Adicionamos o expurgo nos bancos de dados respeitando a regra de negócio:
+    # 90 dias para ofertas (imóveis) e 30 dias para procuras (compradores)
+    limite_90d = int(time.time()) - (90 * 24 * 60 * 60)
+    limite_30d = int(time.time()) - (30 * 24 * 60 * 60)
+    
+    # O PostgreSQL guarda o histórico bruto, usamos o maior prazo (90 dias) para apagar a linha da tabela
+    purge_old_data_sql(limite_90d)
+    
+    # O Neo4j expurga arestas específicas baseado no prazo de cada tipo
+    purge_old_data_neo4j(limite_30d, limite_90d)
 
 last_cleanup = 0.0
 
 while True:
-    # 1. Lê a fila do banco de dados (Substitui o read_new_messages)
+
     new_messages = get_pending_messages()
 
     if new_messages:
         try:
-            # 2. Processamento NLP
+            # 1. Processamento NLP
             sellers, buyers, useless = run_classifier(new_messages)
             sellers_pad, buyers_pad = run_normalizer(sellers, buyers)
-            self_ads = run_self_normalizer(get_property_details())
+            self_ads = get_property_details()
 
             print(f"-> Vendedores encontrados: {len(sellers_pad)}")
             print(f"-> Compradores encontrados: {len(buyers_pad)}")
 
-            # 3. Ingestão no Grafo (Neo4j)
-            print("[GRAPH] Iniciando ingestão no Neo4j...")
+            # 2. Ingestão e Matching no Grafo (Neo4j)
+            print("[GRAPH] Iniciando operações no Neo4j...")
+            graph = GraphClient()
             try:
-                graph = GraphClient()
-                for seller in sellers_pad:
-                    graph.ingest_ad(seller)
-                for buyer in buyers_pad:
-                    graph.ingest_ad(buyer)
-                for self_ad in self_ads:
-                    graph.ingest_ad(self_ad)
-                graph.close()
-                print("[GRAPH] Ingestão concluída com sucesso!")
+                for ad in sellers_pad + buyers_pad + self_ads:
+                    graph.ingest_ad(ad)
+                
+                print("[GRAPH] Ingestão concluída! Buscando matches semânticos...")
+                # Substitui a chamada get_opportunity() do matcher.py antigo
+                opportunities = graph.match_opportunities() 
+                
             except Exception as e:
-                print(f"[GRAPH] Erro ao salvar no grafo: {e}")
+                print(f"[GRAPH] Erro nas operações do grafo: {e}")
+                opportunities = []
+            finally:
+                graph.close()
 
-            # 4. Matching Semântico
-            self_opportunities = get_opportunity(self_ads, buyers_pad)
+            # 3. Salva as oportunidades (seja de terceiros ou self)
+            if opportunities:
+                save_opportunities(opportunities)
+                print(f"[MATCH] {len(opportunities)} oportunidades salvas na fila de envio!")
 
-            # 5. Salva as oportunidades (Substitui o export_self_opportunities)
-            if self_opportunities:
-                save_opportunities(self_opportunities)
-                print(f"[MATCH] {len(self_opportunities)} oportunidades salvas na fila de envio!")
-
-            # 6. Atualiza o status das mensagens processadas com sucesso no banco
-            # (Substitui o save_state)
-            
-            # Cria um dicionário rápido para achar os dados normalizados pelo message_id
+            # 4. Atualiza o status no banco
             pad_data_map = {ad["original_content"]["message_id"]: ad for ad in sellers_pad + buyers_pad}
 
             for msg in new_messages:
                 msg_id = msg["message_id"]
                 norm_data = pad_data_map.get(msg_id)
-                # Se não tem norm_data, é porque foi classificada como useless
                 update_message_status(msg_id, "PROCESSED", normalized_data=norm_data)
 
             print("Lote processado com sucesso:", len(new_messages))
 
         except Exception as e:
-            print(f"[ENGINE ERRO CRÍTICO] Falha ao processar lote de mensagens: {e}")
-            # Em caso de erro grave, as mensagens continuam como 'PENDING' no banco
-            # e o bot tentará processar novamente no próximo ciclo.
+            print(f"[ENGINE ERRO CRÍTICO] Falha ao processar lote: {e}")
 
-  #  if time.time() - last_cleanup >= CLEANUP_INTERVAL_SECONDS:
-   #      run_cleanup()
-    #    last_cleanup = time.time()
+    # Descomente e ajuste a indentação se quiser ativar a limpeza periódica
+    # if time.time() - last_cleanup >= CLEANUP_INTERVAL_SECONDS:
+    #     run_cleanup()
+    #     last_cleanup = time.time()
 
     time.sleep(3)

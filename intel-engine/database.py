@@ -2,6 +2,7 @@ import hashlib
 import json
 import os
 import psycopg2
+import time
 from psycopg2.pool import SimpleConnectionPool
 
 from psycopg2.extras import RealDictCursor
@@ -62,29 +63,40 @@ def get_available_properties() -> list[dict]:
 
 def get_property_details() -> list[dict]:
     """
-    Mantém a mesma inteligência do seu pipeline original:
-    Retorna os imóveis próprios simulando a 'forma' de um message_data vindo do WhatsApp.
-
-    IMPORTANTE: inclui imovel_id para que o matcher/normalizer consigam
-    propagar o ImovelID real até a tabela opportunities.matched_imovel_id.
+    Retorna os imóveis próprios estruturados diretamente para a ingestão do Neo4j,
+    ignorando completamente a necessidade de passar pelo normalizer (spaCy).
     """
     properties_available = get_available_properties()
     properties_details = []
     
     for prop in properties_available:
-        description = prop.get("descricao")  # PostgreSQL adota chaves em lowercase por padrão
+        description = prop.get("descricao")
         if not description:
             continue
             
-        properties_details.append(
-            {
-                "message_id": f"self-{hashlib.md5(description.encode()).hexdigest()}",
-                "message": description,
-                "author_name": "Majesto",
+        imovel_id = prop.get("imovelid")
+        
+        # Cria a estrutura exata que o `ingest_ad` do neo4j_client.py espera
+        properties_details.append({
+            "original_content": {
+                "author_name": "Majesto (Imóvel Próprio)",
                 "author_phone": None,
-                "imovel_id": prop.get("imovelid"),  # preserva o ID real do imóvel
-            }
-        )
+                "message_id": f"self-{imovel_id}",
+                "timestamp": int(time.time()),
+                "imovel_id": imovel_id
+            },
+            "intent": "oferece",
+            "raw_text": description,
+            # Adapte as chaves (bairro, tipo, etc.) para corresponderem às colunas reais do seu DB
+            "neighborhood": [prop.get("bairro", "Desconhecido")], 
+            "property_type": prop.get("tipo"),
+            "price": prop.get("valorvenda") or prop.get("preco"),
+            "bedrooms": prop.get("quartos"),
+            "area_m2": prop.get("area"),
+            "parking_spots": prop.get("vagas"),
+            "seafront": prop.get("frente_mar", False)
+        })
+
     return properties_details
 
 
@@ -145,17 +157,8 @@ def update_message_status(message_id: str, status: str, normalized_data: dict | 
 
 def save_opportunities(opportunities_list: list[dict]):
     """
-    Salva os matches gerados pelo matcher.py na tabela transacional.
-    Substitui o antigo self_opportunities.jsonl.
-
-    Cada item de opportunities_list tem o formato:
-        {"buyer": {...}, "seller": {...}, "score": int}
-    (retornado por matcher.get_opportunity)
-
-    matched_imovel_id vem de seller["original_content"]["imovel_id"] --
-    esse campo é propagado desde get_property_details() (database.py)
-    através de run_self_normalizer() (normalizer.py), que guarda o dict
-    original inteiro dentro de "original_content".
+    Salva os matches gerados pelo Neo4j na tabela transacional.
+    Lê o formato simplificado e direto gerado pelo Cypher.
     """
     query = """
         INSERT INTO opportunities
@@ -171,15 +174,16 @@ def save_opportunities(opportunities_list: list[dict]):
         with conn:
             with conn.cursor() as cursor:
                 for opp in opportunities_list:
-                    buyer_message_id = opp["buyer"]["original_content"]["message_id"]
-                    seller_message_id = opp["seller"]["original_content"]["message_id"]
-                    matched_imovel_id = opp["seller"]["original_content"].get("imovel_id")
-                    match_score = opp["score"]
+                    # Garantir que a query Cypher no neo4j_client.py retorne estes IDs no dict!
+                    buyer_msg_id = opp.get("buyer_message_id")
+                    seller_msg_id = opp.get("seller_message_id")
+                    matched_imovel_id = opp.get("matched_imovel_id") 
+                    match_score = opp.get("score", 0)
                     match_details = json.dumps(opp)
 
                     cursor.execute(query, (
-                        buyer_message_id,
-                        seller_message_id,
+                        buyer_msg_id,
+                        seller_msg_id,
                         matched_imovel_id,
                         match_score,
                         match_details,
@@ -189,3 +193,4 @@ def save_opportunities(opportunities_list: list[dict]):
         print(f"[ERRO BANCO] Falha ao salvar lote de oportunidades: {e}")
     finally:
         release_db_connection(conn)
+        
