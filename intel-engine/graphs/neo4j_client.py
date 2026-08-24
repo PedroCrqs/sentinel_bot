@@ -48,6 +48,38 @@ def _resolve_property_id(ad_data: dict, original: dict, message_id: str) -> str:
 
     return _require_identity(f"{message_id}_imovel", "identidade provisória do Imovel")
 
+
+def _is_buying(ad_data: dict) -> bool:
+    return str(ad_data.get("intent", "")).lower() in {
+        "buy",
+        "buying",
+        "compra",
+        "comprar",
+        "busca",
+        "buscando",
+        "interesse",
+        "demand",
+        "procura",
+        "procurando",
+        "demanda",
+    }
+
+
+def _resolve_demand_id(original: dict, message_id: str) -> str:
+    """A purchase message currently represents one demand."""
+    return _require_identity(original.get("demand_id", message_id), "Demanda.demand_id")
+
+
+def _resolve_offer_id(original: dict, message_id: str) -> str:
+    """Resolve an offer identity without using phone or description text."""
+    if original.get("source") == "inventory":
+        property_id = _require_identity(
+            original.get("imovel_id"), "ImovelID do inventário"
+        )
+        return _require_identity(f"self-offer:{property_id}", "Oferta.offer_id")
+
+    return _require_identity(original.get("offer_id", message_id), "Oferta.offer_id")
+
 class GraphClient:
     def __init__(self):
         self.driver = GraphDatabase.driver(URI, auth=AUTH)
@@ -76,46 +108,100 @@ class GraphClient:
         message_id = _require_identity(
             original.get("message_id"), "message_id/Mensagem.id"
         )
+        buying = _is_buying(ad_data)
         property_id = _resolve_property_id(ad_data, original, message_id)
+        demand_id = _resolve_demand_id(original, message_id) if buying else None
+        offer_id = _resolve_offer_id(original, message_id) if not buying else None
         
-        bairros = ad_data.get("neighborhood", [])
+        bairros = [
+            str(bairro).strip()
+            for bairro in (ad_data.get("neighborhood") or [])
+            if bairro and str(bairro).strip().lower() != "desconhecido"
+        ]
         bairro_principal = bairros[0] if bairros else "Desconhecido"
 
         query = """
-        // Pessoa e Bairro
+        // Pessoa e Mensagem
         MERGE (p:Pessoa {person_id: $person_id})
         ON CREATE SET p.nome = $nome, p.telefone = $telefone
         SET p.nome = CASE WHEN $nome IS NOT NULL AND trim($nome) <> '' THEN $nome ELSE p.nome END,
             p.telefone = CASE WHEN $telefone IS NOT NULL AND trim($telefone) <> '' THEN $telefone ELSE p.telefone END
-        
-        MERGE (b:Bairro {nome: $bairro})
         
         // Mensagem
         MERGE (m:Mensagem {id: $msg_id})
         SET m.texto = $texto, m.timestamp = $ts
         MERGE (p)-[:ENVIOU]->(m)
         
-        // Imóvel
-        MERGE (i:Imovel {id: $property_id})
-        SET i.tipo = $tipo, 
-            i.preco = $preco, 
-            i.quartos = $quartos, 
-            i.area = $area,
-            i.vagas = $vagas,
-            i.frente_mar = $frente_mar,
-            i.condominio = $condominio,
-            i.sol = $sol,
-            i.perto_praia = $perto_praia
-            
-        MERGE (i)-[:LOCALIZADO_EM]->(b)
         """
 
-        intent = str(ad_data.get("intent", "")).lower()
-        
-        if intent in ["buy", "buying", "compra", "comprar", "busca", "buscando", "interesse", "demand", "procura", "procurando", "demanda"]:
-            query += "\nMERGE (m)-[:BUSCA]->(i)"
+        if buying:
+            query += """
+            // Modelo novo: a compra expressa uma Demanda, não um Imovel.
+            MERGE (d:Demanda {demand_id: $demand_id})
+            SET d.price = $preco,
+                d.bedrooms = $quartos,
+                d.area = $area,
+                d.parking_spots = $vagas,
+                d.seafront = $frente_mar,
+                d.condominium = $condominio,
+                d.sun_type = $sol,
+                d.nearbeach = $perto_praia,
+                d.property_type = $tipo,
+                d.status = 'ACTIVE'
+            MERGE (p)-[:CRIOU]->(d)
+            MERGE (m)-[:EXPRESSA]->(d)
+            FOREACH (neighborhood IN $bairros |
+                MERGE (db:Bairro {nome: neighborhood})
+                MERGE (d)-[:BUSCA_EM]->(db)
+            )
+
+            // LEGACY: mantido somente para o matcher atual. Será removido
+            // quando match_opportunities() passar a usar Demanda diretamente.
+            MERGE (legacy_i:Imovel {id: $property_id})
+            SET legacy_i.tipo = $tipo,
+                legacy_i.property_type = $tipo,
+                legacy_i.preco = $preco,
+                legacy_i.quartos = $quartos,
+                legacy_i.area = $area,
+                legacy_i.vagas = $vagas,
+                legacy_i.frente_mar = $frente_mar,
+                legacy_i.condominio = $condominio,
+                legacy_i.sol = $sol,
+                legacy_i.perto_praia = $perto_praia,
+                legacy_i.legacy_projection = true
+            MERGE (legacy_b:Bairro {nome: $bairro})
+            MERGE (legacy_i)-[:LOCALIZADO_EM]->(legacy_b)
+            MERGE (m)-[:BUSCA]->(legacy_i)
+            """
         else:
-            query += "\nMERGE (m)-[:OFERECE]->(i)"
+            query += """
+            // Modelo novo: a venda cria uma Oferta que referencia um Imovel.
+            MERGE (i:Imovel {id: $property_id})
+            SET i.property_id = $property_id,
+                i.property_type = $tipo,
+                i.tipo = $tipo,
+                i.quartos = $quartos,
+                i.area = $area,
+                i.vagas = $vagas,
+                i.frente_mar = $frente_mar,
+                i.condominio = $condominio,
+                i.sol = $sol,
+                i.perto_praia = $perto_praia,
+                // preco é legado para o matcher atual; o preço canônico fica na Oferta.
+                i.preco = $preco
+            MERGE (b:Bairro {nome: $bairro})
+            MERGE (i)-[:LOCALIZADO_EM]->(b)
+            MERGE (o:Oferta {offer_id: $offer_id})
+            ON CREATE SET o.created_at = $created_at
+            SET o.price = $preco,
+                o.status = 'ACTIVE'
+            MERGE (p)-[:PUBLICOU]->(o)
+            MERGE (m)-[:ORIGINA]->(o)
+            MERGE (o)-[:REFERE_SE_A]->(i)
+
+            // LEGACY: mantido para o matcher atual.
+            MERGE (m)-[:OFERECE]->(i)
+            """
 
         with self.driver.session() as session:
             session.run(query, 
@@ -135,7 +221,11 @@ class GraphClient:
                 condominio=ad_data.get("condominium", False),
                 sol=ad_data.get("sun_type"),
                 perto_praia=ad_data.get("nearbeach", False),
-                bairro=bairro_principal
+                bairro=bairro_principal,
+                bairros=bairros,
+                demand_id=demand_id,
+                offer_id=offer_id,
+                created_at=original.get("timestamp", 0)
             )
 
     def match_opportunities(self):

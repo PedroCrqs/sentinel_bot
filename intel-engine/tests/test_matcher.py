@@ -49,15 +49,57 @@ class FakeSession:
         self.store["Mensagem"].setdefault(
             params["msg_id"], {"texto": params["texto"]}
         ).update({"texto": params["texto"], "timestamp": params["ts"]})
-        self.store["Imovel"].setdefault(params["property_id"], {}).update(
-            {"preco": params["preco"], "tipo": params["tipo"]}
-        )
+
+        if "MERGE (d:Demanda" in query:
+            self.store["Demanda"].setdefault(params["demand_id"], {}).update(
+                {
+                    "price": params["preco"],
+                    "bedrooms": params["quartos"],
+                    "status": "ACTIVE",
+                }
+            )
+            self.store["relationships"].update(
+                {
+                    ("Mensagem", params["msg_id"], "EXPRESSA", "Demanda", params["demand_id"]),
+                    ("Pessoa", params["person_id"], "CRIOU", "Demanda", params["demand_id"]),
+                }
+            )
+            self.store["relationships"].update(
+                {
+                    ("Demanda", params["demand_id"], "BUSCA_EM", "Bairro", bairro)
+                    for bairro in params["bairros"]
+                }
+            )
+            self.store["Imovel"].setdefault(params["property_id"], {}).update(
+                {"legacy_projection": True, "preco": params["preco"]}
+            )
+        else:
+            self.store["Imovel"].setdefault(params["property_id"], {}).update(
+                {"preco": params["preco"], "tipo": params["tipo"]}
+            )
+            self.store["Oferta"].setdefault(params["offer_id"], {}).update(
+                {"price": params["preco"], "status": "ACTIVE"}
+            )
+            self.store["relationships"].update(
+                {
+                    ("Mensagem", params["msg_id"], "ORIGINA", "Oferta", params["offer_id"]),
+                    ("Pessoa", params["person_id"], "PUBLICOU", "Oferta", params["offer_id"]),
+                    ("Oferta", params["offer_id"], "REFERE_SE_A", "Imovel", params["property_id"]),
+                }
+            )
         return []
 
 
 class FakeDriver:
     def __init__(self):
-        self.store = {"Pessoa": {}, "Mensagem": {}, "Imovel": {}}
+        self.store = {
+            "Pessoa": {},
+            "Mensagem": {},
+            "Demanda": {},
+            "Oferta": {},
+            "Imovel": {},
+            "relationships": set(),
+        }
         self.sessions = []
 
     def session(self):
@@ -84,6 +126,18 @@ def external_ad(person_id="person-1", message_id="message-1", phone="5511"):
         "property_type": "Apartamento",
         "price": 300000,
     }
+
+
+def buying_ad(person_id="buyer-1", message_id="demand-1", neighborhoods=None):
+    ad = external_ad(person_id, message_id)
+    ad.update({
+        "intent": "busca",
+        "neighborhood": neighborhoods or ["Pituba"],
+        "property_type": "Apartamento",
+        "price": 800000,
+        "bedrooms": 3,
+    })
+    return ad
 
 
 class CanonicalIdentityTests(unittest.TestCase):
@@ -160,6 +214,64 @@ class CanonicalIdentityTests(unittest.TestCase):
     def test_external_property_identity_is_explicitly_provisional(self):
         self.client.ingest_ad(external_ad(message_id="message-9"))
         self.assertIn("message-9_imovel", self.driver.store["Imovel"])
+
+    def test_buying_message_creates_demand_and_direct_location(self):
+        self.client.ingest_ad(buying_ad())
+
+        self.assertEqual(len(self.driver.store["Pessoa"]), 1)
+        self.assertEqual(len(self.driver.store["Mensagem"]), 1)
+        self.assertEqual(len(self.driver.store["Demanda"]), 1)
+        self.assertEqual(
+            len([
+                relation
+                for relation in self.driver.store["relationships"]
+                if relation[2] == "BUSCA_EM"
+            ]),
+            1,
+        )
+        query = self.driver.sessions[-1].queries[0][0]
+        self.assertIn("MERGE (m)-[:EXPRESSA]->(d)", query)
+        self.assertIn("MERGE (d)-[:BUSCA_EM]->(db)", query)
+
+    def test_buying_message_preserves_multiple_neighborhoods(self):
+        self.client.ingest_ad(
+            buying_ad(neighborhoods=["Pituba", "Itaigara"])
+        )
+
+        locations = [
+            relation
+            for relation in self.driver.store["relationships"]
+            if relation[2] == "BUSCA_EM"
+        ]
+        self.assertEqual(len(locations), 2)
+
+    def test_selling_message_creates_offer_and_property(self):
+        self.client.ingest_ad(external_ad())
+
+        self.assertEqual(len(self.driver.store["Oferta"]), 1)
+        self.assertEqual(len(self.driver.store["Imovel"]), 1)
+        self.assertIn(
+            ("Oferta", "message-1", "REFERE_SE_A", "Imovel", "message-1_imovel"),
+            self.driver.store["relationships"],
+        )
+
+    def test_same_selling_message_is_one_offer_and_one_property(self):
+        ad = external_ad()
+        self.client.ingest_ad(ad)
+        self.client.ingest_ad(ad)
+
+        self.assertEqual(len(self.driver.store["Oferta"]), 1)
+        self.assertEqual(len(self.driver.store["Imovel"]), 1)
+
+    def test_inventory_uses_stable_offer_identity(self):
+        ad = external_ad(person_id="system:majesto", message_id="self-42", phone=None)
+        ad["original_content"].update({"imovel_id": 42, "source": "inventory"})
+        self.client.ingest_ad(ad)
+        self.client.ingest_ad(ad)
+
+        self.assertEqual(len(self.driver.store["Oferta"]), 1)
+        self.assertIn("self-offer:42", self.driver.store["Oferta"])
+        self.assertEqual(len(self.driver.store["Imovel"]), 1)
 
     def test_matching_compares_person_id(self):
         self.client.match_opportunities()
