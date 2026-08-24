@@ -12,6 +12,42 @@ PASSWORD = os.getenv("NEO4J_PASSWORD", "")
 
 AUTH = (USER, PASSWORD)
 
+INVALID_IDENTITIES = {"", "desconhecido"}
+
+
+def _require_identity(value, field_name: str):
+    """Validate and normalize an identity before sending it to Neo4j."""
+    if value is None:
+        raise ValueError(f"{field_name} é obrigatório para projetar no Neo4j")
+
+    if isinstance(value, str):
+        identity = value.strip()
+        if not identity or identity.lower() in INVALID_IDENTITIES:
+            raise ValueError(f"{field_name} inválido para projeção Neo4j: {value!r}")
+        return identity
+
+    if not value:
+        raise ValueError(f"{field_name} inválido para projeção Neo4j: {value!r}")
+
+    return value
+
+
+def _resolve_property_id(ad_data: dict, original: dict, message_id: str) -> str:
+    """Resolve the current projection identity for an Imovel.
+
+    Inventory properties must use the PostgreSQL ImovelID. External ads keep
+    the temporary message-based identity until Oferta and Imovel are split.
+    """
+    inventory_property = original.get("source") == "inventory"
+    if inventory_property:
+        return _require_identity(original.get("imovel_id"), "ImovelID do inventário")
+
+    explicit_id = original.get("imovel_id")
+    if explicit_id is not None:
+        return _require_identity(explicit_id, "ImovelID")
+
+    return _require_identity(f"{message_id}_imovel", "identidade provisória do Imovel")
+
 class GraphClient:
     def __init__(self):
         self.driver = GraphDatabase.driver(URI, auth=AUTH)
@@ -32,15 +68,25 @@ class GraphClient:
         """
         Recebe o dicionário gerado pelo normalizer.py e insere no formato de Grafo.
         """
-        original = ad_data.get("original_content", {})
+        original = ad_data.get("original_content") or {}
+
+        person_id = _require_identity(
+            original.get("author_id"), "author_id/Pessoa.person_id"
+        )
+        message_id = _require_identity(
+            original.get("message_id"), "message_id/Mensagem.id"
+        )
+        property_id = _resolve_property_id(ad_data, original, message_id)
         
         bairros = ad_data.get("neighborhood", [])
         bairro_principal = bairros[0] if bairros else "Desconhecido"
 
         query = """
         // Pessoa e Bairro
-        MERGE (p:Pessoa {telefone: $telefone})
-        ON CREATE SET p.nome = $nome
+        MERGE (p:Pessoa {person_id: $person_id})
+        ON CREATE SET p.nome = $nome, p.telefone = $telefone
+        SET p.nome = CASE WHEN $nome IS NOT NULL AND trim($nome) <> '' THEN $nome ELSE p.nome END,
+            p.telefone = CASE WHEN $telefone IS NOT NULL AND trim($telefone) <> '' THEN $telefone ELSE p.telefone END
         
         MERGE (b:Bairro {nome: $bairro})
         
@@ -50,7 +96,7 @@ class GraphClient:
         MERGE (p)-[:ENVIOU]->(m)
         
         // Imóvel
-        MERGE (i:Imovel {id: $imovel_id})
+        MERGE (i:Imovel {id: $property_id})
         SET i.tipo = $tipo, 
             i.preco = $preco, 
             i.quartos = $quartos, 
@@ -73,10 +119,11 @@ class GraphClient:
 
         with self.driver.session() as session:
             session.run(query, 
-                telefone=original.get("author_phone", "Desconhecido"),
+                person_id=person_id,
+                telefone=original.get("author_phone"),
                 nome=original.get("author_name", "Desconhecido"),
-                msg_id=original.get("message_id", "Desconhecido"),
-                imovel_id=original.get("imovel_id", original.get("message_id", "") + "_imovel"),
+                msg_id=message_id,
+                property_id=property_id,
                 texto=ad_data.get("raw_text", ""),
                 ts=original.get("timestamp", 0),
                 tipo=ad_data.get("property_type"),
@@ -96,7 +143,7 @@ class GraphClient:
         MATCH (comprador:Pessoa)-[:ENVIOU]->(m_busca:Mensagem)-[:BUSCA]->(i_busca:Imovel)-[:LOCALIZADO_EM]->(b_busca:Bairro)
         MATCH (vendedor:Pessoa)-[:ENVIOU]->(m_oferece:Mensagem)-[:OFERECE]->(i_oferece:Imovel)-[:LOCALIZADO_EM]->(b_oferece:Bairro)
         
-        WHERE comprador.telefone <> vendedor.telefone
+        WHERE comprador.person_id <> vendedor.person_id
           AND (b_busca.nome = 'Desconhecido' OR b_busca.nome = b_oferece.nome)
           AND (i_busca.preco IS NULL OR (i_oferece.preco >= (i_busca.preco * 0.80) AND i_oferece.preco <= (i_busca.preco + 50000)))
           AND (i_busca.quartos IS NULL OR i_oferece.quartos >= i_busca.quartos)

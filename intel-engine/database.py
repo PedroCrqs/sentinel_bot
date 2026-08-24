@@ -84,10 +84,12 @@ def get_property_details() -> list[dict]:
         properties_details.append({
             "original_content": {
                 "author_name": "Majesto (Imóvel Próprio)",
+                "author_id": "system:majesto",
                 "author_phone": None,
                 "message_id": f"self-{imovel_id}",
                 "timestamp": int(time.time()),
-                "imovel_id": imovel_id
+                "imovel_id": imovel_id,
+                "source": "inventory",
             },
             "intent": "oferece",
             "raw_text": description,
