@@ -7,6 +7,7 @@ from psycopg2.pool import SimpleConnectionPool
 
 from psycopg2.extras import Json, RealDictCursor
 from runtime_config import database_settings
+from inventory_adapter import map_inventory_row
 
 # Inicialização do Pool de Conexões (min=1, max=10 conexões por exemplo)
 db_pool = SimpleConnectionPool(
@@ -30,8 +31,19 @@ def release_db_connection(conn):
 # ==============================================================================
 
 def get_available_properties() -> list[dict]:
-    """Busca imóveis com status 'Disponível' direto do PostgreSQL."""
-    query = "SELECT * FROM Imoveis WHERE ImovelStatus = 'Disponível';"
+    """Read the external inventory and return canonical Sentinel rows.
+
+    ``public.imoveis`` is external/shared inventory. The explicit column list
+    and LEFT JOIN keep its physical schema at this integration boundary.
+    """
+    query = """
+        SELECT i.imovelid, i.tipologia, i.quartos, i.vagas, i.valor,
+               i.metragem, i.sol, i.bairroid, i.imovelstatus,
+               i.descricao, i.datacadastro, b.nome AS bairro_nome
+        FROM public.imoveis AS i
+        LEFT JOIN public.bairros AS b ON b.bairroid = i.bairroid
+        WHERE i.imovelstatus = %s
+    """
     conn = None
     
     try:
@@ -39,13 +51,17 @@ def get_available_properties() -> list[dict]:
         with conn:
             # RealDictCursor faz o psycopg2 retornar dicionários Python nativos
             with conn.cursor(cursor_factory=RealDictCursor) as cursor:
-                cursor.execute(query)
-                return [dict(row) for row in cursor.fetchall()]
+                cursor.execute(query, ("Disponível",))
+                rows = [dict(row) for row in cursor.fetchall()]
     except Exception as e:
         print(f"[ERRO BANCO] Falha ao buscar imóveis disponíveis: {e}")
         return []
     finally:
         release_db_connection(conn)
+
+    # Adapter errors are deliberately outside the database error handler:
+    # malformed external inventory must be visible to the caller.
+    return [map_inventory_row(row) for row in rows]
 
 
 def get_property_details() -> list[dict]:
@@ -57,11 +73,11 @@ def get_property_details() -> list[dict]:
     properties_details = []
     
     for prop in properties_available:
-        description = prop.get("descricao")
+        description = prop.get("description")
         if not description:
             continue
             
-        imovel_id = prop.get("imovelid")
+        imovel_id = prop["property_id"]
         
         # Cria a estrutura exata que o `ingest_ad` do neo4j_client.py espera
         properties_details.append({
@@ -77,13 +93,15 @@ def get_property_details() -> list[dict]:
             "intent": "oferece",
             "raw_text": description,
             # Adapte as chaves (bairro, tipo, etc.) para corresponderem às colunas reais do seu DB
-            "neighborhood": [prop.get("bairro", "Desconhecido")], 
-            "property_type": prop.get("tipo"),
-            "price": prop.get("valorvenda") or prop.get("preco"),
-            "bedrooms": prop.get("quartos"),
-            "area_m2": prop.get("area"),
-            "parking_spots": prop.get("vagas"),
-            "seafront": prop.get("frente_mar", False)
+            "neighborhood": [prop["neighborhood"]],
+            "property_type": prop["property_type"],
+            "price": prop["price"],
+            "bedrooms": prop["bedrooms"],
+            "area_m2": prop["area"],
+            "parking_spots": prop["parking_spots"],
+            # The external schema has no frente_mar column: None means unknown.
+            "seafront": None,
+            "status": prop["status"],
         })
 
     return properties_details
