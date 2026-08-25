@@ -11,13 +11,13 @@ def purge_old_data_neo4j(limite_30d: int, limite_90d: int):
         graph = GraphClient()
         query = """
         // 1. Apaga mensagens de OFERTA mais velhas que 90 dias
-        MATCH (m:Mensagem)-[:OFERECE]->(:Imovel) WHERE m.timestamp < $limite_90d
+        MATCH (m:Mensagem)-[:ORIGINA]->(:Oferta) WHERE m.timestamp < $limite_90d
         DETACH DELETE m
         
         WITH 1 AS dummy
         
-        // 2. Apaga mensagens de BUSCA mais velhas que 30 dias
-        MATCH (m:Mensagem)-[:BUSCA]->(:Imovel) WHERE m.timestamp < $limite_30d
+        // 2. Apaga mensagens de demanda mais velhas que 30 dias
+        MATCH (m:Mensagem)-[:EXPRESSA]->(:Demanda) WHERE m.timestamp < $limite_30d
         DETACH DELETE m
         
         WITH 1 AS dummy

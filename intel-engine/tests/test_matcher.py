@@ -73,9 +73,6 @@ class FakeSession:
                     for bairro in params["bairros"]
                 }
             )
-            self.store["Imovel"].setdefault(params["property_id"], {}).update(
-                {"legacy_projection": True, "preco": params["preco"]}
-            )
         else:
             self.store["Imovel"].setdefault(params["property_id"], {}).update(
                 {"preco": params["preco"], "tipo": params["tipo"]}
@@ -241,6 +238,7 @@ class CanonicalIdentityTests(unittest.TestCase):
         self.assertEqual(len(self.driver.store["Pessoa"]), 1)
         self.assertEqual(len(self.driver.store["Mensagem"]), 1)
         self.assertEqual(len(self.driver.store["Demanda"]), 1)
+        self.assertEqual(len(self.driver.store["Imovel"]), 0)
         self.assertEqual(
             len([
                 relation
@@ -252,6 +250,7 @@ class CanonicalIdentityTests(unittest.TestCase):
         query = self.driver.sessions[-1].queries[0][0]
         self.assertIn("MERGE (m)-[:EXPRESSA]->(d)", query)
         self.assertIn("MERGE (d)-[:BUSCA_EM]->(db)", query)
+        self.assertNotIn("[:BUSCA]", query)
 
     def test_buying_message_preserves_multiple_neighborhoods(self):
         self.client.ingest_ad(
@@ -274,6 +273,8 @@ class CanonicalIdentityTests(unittest.TestCase):
             ("Oferta", "message-1", "REFERE_SE_A", "Imovel", "message-1_imovel"),
             self.driver.store["relationships"],
         )
+        query = self.driver.sessions[-1].queries[0][0]
+        self.assertNotIn("[:OFERECE]", query)
 
     def test_same_selling_message_is_one_offer_and_one_property(self):
         ad = external_ad()

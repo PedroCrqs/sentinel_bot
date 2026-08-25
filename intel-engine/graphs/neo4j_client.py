@@ -101,7 +101,7 @@ class GraphClient:
             original.get("message_id"), "message_id/Mensagem.id"
         )
         buying = _is_buying(ad_data)
-        property_id = _resolve_property_id(ad_data, original, message_id)
+        property_id = _resolve_property_id(ad_data, original, message_id) if not buying else None
         demand_id = _resolve_demand_id(original, message_id) if buying else None
         offer_id = _resolve_offer_id(original, message_id) if not buying else None
         
@@ -147,23 +147,6 @@ class GraphClient:
                 MERGE (d)-[:BUSCA_EM]->(db)
             )
 
-            // LEGACY: mantido somente para o matcher atual. Será removido
-            // quando match_opportunities() passar a usar Demanda diretamente.
-            MERGE (legacy_i:Imovel {id: $property_id})
-            SET legacy_i.tipo = $tipo,
-                legacy_i.property_type = $tipo,
-                legacy_i.preco = $preco,
-                legacy_i.quartos = $quartos,
-                legacy_i.area = $area,
-                legacy_i.vagas = $vagas,
-                legacy_i.frente_mar = $frente_mar,
-                legacy_i.condominio = $condominio,
-                legacy_i.sol = $sol,
-                legacy_i.perto_praia = $perto_praia,
-                legacy_i.legacy_projection = true
-            MERGE (legacy_b:Bairro {nome: $bairro})
-            MERGE (legacy_i)-[:LOCALIZADO_EM]->(legacy_b)
-            MERGE (m)-[:BUSCA]->(legacy_i)
             """
         else:
             query += """
@@ -191,8 +174,6 @@ class GraphClient:
             MERGE (m)-[:ORIGINA]->(o)
             MERGE (o)-[:REFERE_SE_A]->(i)
 
-            // LEGACY: mantido para o matcher atual.
-            MERGE (m)-[:OFERECE]->(i)
             """
 
         with self.driver.session() as session:

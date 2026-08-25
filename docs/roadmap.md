@@ -36,12 +36,14 @@ O matching deixarÃ¡ de ser um cruzamento iterativo de listas no Python e passarÃ
 
 ```mermaid
 graph TD
-    Comprador((Comprador)) -->|BUSCA| Imovel((Imovel))
-    Imovel -->|LOCALIZADO_EM| Bairro((Bairro))
-    Vendedor((Vendedor)) -->|OFERECE| Imovel
+    Comprador((Pessoa)) -->|CRIOU| Demanda((Demanda))
+    Demanda -->|BUSCA_EM| Bairro((Bairro))
+    Vendedor((Pessoa)) -->|PUBLICOU| Oferta((Oferta))
+    Oferta -->|REFERE_SE_A| Imovel((Imovel))
+    Imovel -->|LOCALIZADO_EM| Bairro
   
-    style Comprador fill:#a0c4ff,stroke:#333,stroke-width:2px
-    style Vendedor fill:#ffadad,stroke:#333,stroke-width:2px
+    style Demanda fill:#a0c4ff,stroke:#333,stroke-width:2px
+    style Oferta fill:#ffadad,stroke:#333,stroke-width:2px
     style Imovel fill:#fdffb6,stroke:#333,stroke-width:2px
     style Bairro fill:#caffbf,stroke:#333,stroke-width:2px
 ```
