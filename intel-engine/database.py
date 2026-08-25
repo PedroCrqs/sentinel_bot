@@ -5,7 +5,7 @@ import time
 
 from psycopg2.pool import SimpleConnectionPool
 
-from psycopg2.extras import RealDictCursor
+from psycopg2.extras import Json, RealDictCursor
 from runtime_config import database_settings
 
 # Inicialização do Pool de Conexões (min=1, max=10 conexões por exemplo)
@@ -165,7 +165,7 @@ def save_opportunities(opportunities_list: list[dict]) -> list[int]:
                     seller_msg_id = opp.get("seller_message_id")
                     matched_imovel_id = opp.get("matched_imovel_id") 
                     match_score = opp.get("score", 0)
-                    match_details = json.dumps(opp)
+                    match_details = Json(opp)
 
                     cursor.execute(query, (
                         buyer_msg_id, seller_msg_id, matched_imovel_id,
