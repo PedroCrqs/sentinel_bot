@@ -1,35 +1,18 @@
 import hashlib
 import json
-import os
 import psycopg2
 import time
-from pathlib import Path
 
 from psycopg2.pool import SimpleConnectionPool
 
 from psycopg2.extras import RealDictCursor
-from dotenv import load_dotenv
-
-# FORÇA A LEITURA DO .ENV NA RAIZ DO PROJETO
-env_path = Path(__file__).resolve().parent.parent / ".env"
-load_dotenv(env_path)
-
-# Configuração de Conexão via Variáveis de Ambiente
-DB_NAME = os.getenv("POSTGRES_DB", "imoveis")
-DB_USER = os.getenv("POSTGRES_USER", "imoveis_app")
-DB_PASSWORD = os.getenv("POSTGRES_PASSWORD", "")
-DB_HOST = os.getenv("DB_HOST", "localhost")
-DB_PORT = os.getenv("DB_PORT", "5432")
+from runtime_config import database_settings
 
 # Inicialização do Pool de Conexões (min=1, max=10 conexões por exemplo)
 db_pool = SimpleConnectionPool(
     minconn=1,
     maxconn=10,
-    dbname=DB_NAME,
-    user=DB_USER,
-    password=DB_PASSWORD,
-    host=DB_HOST,
-    port=DB_PORT
+    **database_settings(),
 )
 
 def get_db_connection():

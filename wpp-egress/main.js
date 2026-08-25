@@ -9,20 +9,24 @@ const amqplib = require("amqplib"); // <-- NOVO: Biblioteca do RabbitMQ
 require("dotenv").config({ path: path.resolve(__dirname, '../.env') });
 
 // Configuração do RabbitMQ
-const RABBITMQ_URL = process.env.RABBITMQ_URL || "amqp://localhost";
+const RABBITMQ_URL = process.env.RABBITMQ_URL || "amqp://localhost:5672";
 
 // Configuração do Pool de Conexão com o PostgreSQL
 const pool = new Pool({
   connectionString:
     process.env.DATABASE_URL ||
-    "postgresql://postgres:postgres@localhost:5432/imoveis",
+    "postgresql://postgres:CHANGE_ME@localhost:5432/sentinel_db",
 });
 
 const SESSION_PATH = path.join(__dirname, "session");
 
-const GROUP_ID = "120363424642701935@g.us";
+const GROUP_ID = process.env.GROUP_ID || "";
 // Imóveis próprios: notificação prioritária vai direto por DM, não pro grupo
-const PRIORITY_CONTACT_ID = "96654279573661@lid";
+const PRIORITY_CONTACT_ID = process.env.PRIORITY_CONTACT_ID || "";
+
+if (!GROUP_ID) {
+  throw new Error("Missing required configuration: GROUP_ID");
+}
 
 if (!fs.existsSync(SESSION_PATH)) {
   fs.mkdirSync(SESSION_PATH, { recursive: true });

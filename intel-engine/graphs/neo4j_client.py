@@ -1,16 +1,5 @@
-import os
-from pathlib import Path
-from dotenv import load_dotenv
 from neo4j import GraphDatabase
-
-env_path = Path(__file__).resolve().parent.parent.parent / ".env"
-load_dotenv(env_path)
-
-URI = os.getenv("NEO4J_URI", "")
-USER = os.getenv("NEO4J_USERNAME", "")
-PASSWORD = os.getenv("NEO4J_PASSWORD", "")
-
-AUTH = (USER, PASSWORD)
+from runtime_config import required_config
 
 INVALID_IDENTITIES = {"", "desconhecido"}
 
@@ -82,7 +71,10 @@ def _resolve_offer_id(original: dict, message_id: str) -> str:
 
 class GraphClient:
     def __init__(self):
-        self.driver = GraphDatabase.driver(URI, auth=AUTH)
+        uri = required_config("NEO4J_URI")
+        user = required_config("NEO4J_USERNAME")
+        password = required_config("NEO4J_PASSWORD")
+        self.driver = GraphDatabase.driver(uri, auth=(user, password))
 
     def close(self):
         """Fecha a conexão com o banco de dados."""

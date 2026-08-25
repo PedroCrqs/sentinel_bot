@@ -4,7 +4,7 @@ const { knownIds, lastSeenAds } = require("./config");
 const pool = new Pool({
   connectionString:
     process.env.DATABASE_URL ||
-    "postgresql://postgres:postgres@localhost:5432/imoveis",
+    "postgresql://postgres:CHANGE_ME@localhost:5432/sentinel_db",
 });
 
 // ============================================================================

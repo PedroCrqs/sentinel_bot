@@ -1,5 +1,6 @@
 import sys
 import unittest
+import os
 from pathlib import Path
 import types
 
@@ -144,12 +145,28 @@ class CanonicalIdentityTests(unittest.TestCase):
     def setUp(self):
         self.driver = FakeDriver()
         self.original_driver = neo4j_client.GraphDatabase.driver
+        self.original_env = {
+            key: os.environ.get(key)
+            for key in ("NEO4J_URI", "NEO4J_USERNAME", "NEO4J_PASSWORD")
+        }
+        os.environ.update(
+            {
+                "NEO4J_URI": "bolt://test",
+                "NEO4J_USERNAME": "neo4j",
+                "NEO4J_PASSWORD": "test-password",
+            }
+        )
         neo4j_client.GraphDatabase.driver = lambda *args, **kwargs: self.driver
         self.client = neo4j_client.GraphClient()
 
     def tearDown(self):
         self.client.close()
         neo4j_client.GraphDatabase.driver = self.original_driver
+        for key, value in self.original_env.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
 
     def test_same_person_with_different_messages(self):
         self.client.ingest_ad(external_ad(message_id="message-1"))

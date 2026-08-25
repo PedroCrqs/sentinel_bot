@@ -1,12 +1,11 @@
 import time
 import json
 import pika
-import os
-from pathlib import Path
 
 from classifier import run_classifier
 from normalizer import run_normalizer
 from graphs.neo4j_client import GraphClient
+from runtime_config import rabbitmq_url
 
 from database import (
     get_message_by_id,
@@ -15,7 +14,7 @@ from database import (
     save_opportunities
 )
 
-RABBITMQ_URL = os.getenv("RABBITMQ_URL", "localhost")
+RABBITMQ_URL = rabbitmq_url()
 
 def process_message(ch, method, properties, body):
     """Callback disparado instantaneamente quando uma nova mensagem chega na fila."""
@@ -82,7 +81,7 @@ def main():
     print("[ENGINE] Conectando ao RabbitMQ...")
     print("="*60)
     
-    connection = pika.BlockingConnection(pika.ConnectionParameters(host=RABBITMQ_URL))
+    connection = pika.BlockingConnection(pika.URLParameters(RABBITMQ_URL))
     channel = connection.channel()
 
     # Garante que as filas existem
