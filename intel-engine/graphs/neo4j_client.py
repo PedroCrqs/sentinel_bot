@@ -222,29 +222,54 @@ class GraphClient:
 
     def match_opportunities(self):
         query = """
-        MATCH (comprador:Pessoa)-[:ENVIOU]->(m_busca:Mensagem)-[:BUSCA]->(i_busca:Imovel)-[:LOCALIZADO_EM]->(b_busca:Bairro)
-        MATCH (vendedor:Pessoa)-[:ENVIOU]->(m_oferece:Mensagem)-[:OFERECE]->(i_oferece:Imovel)-[:LOCALIZADO_EM]->(b_oferece:Bairro)
-        
-        WHERE comprador.person_id <> vendedor.person_id
-          AND (b_busca.nome = 'Desconhecido' OR b_busca.nome = b_oferece.nome)
-          AND (i_busca.preco IS NULL OR (i_oferece.preco >= (i_busca.preco * 0.80) AND i_oferece.preco <= (i_busca.preco + 50000)))
-          AND (i_busca.quartos IS NULL OR i_oferece.quartos >= i_busca.quartos)
-          AND (i_busca.frente_mar = false OR i_oferece.frente_mar = true)
+        // Novo modelo: Demanda x Oferta através da vizinhança compartilhada.
+        // As mensagens/pessoas abaixo existem apenas para contexto e auditoria.
+        MATCH (d:Demanda)-[:BUSCA_EM]->(b:Bairro)<-[:LOCALIZADO_EM]-(i:Imovel)<-[:REFERE_SE_A]-(o:Oferta)
+        MATCH (comprador:Pessoa)-[:CRIOU]->(d)
+        MATCH (m_busca:Mensagem)-[:EXPRESSA]->(d)
+        MATCH (vendedor:Pessoa)-[:PUBLICOU]->(o)
+        MATCH (m_oferece:Mensagem)-[:ORIGINA]->(o)
 
-        WITH comprador, m_busca, i_busca, b_busca, vendedor, m_oferece, i_oferece, b_oferece,
-             (10 + 10 + 5) AS score_base, 
-             CASE WHEN i_busca.tipo IS NOT NULL AND i_busca.tipo = i_oferece.tipo THEN 5 ELSE 0 END AS score_tipo,
-             CASE WHEN i_busca.area IS NOT NULL AND i_oferece.area >= i_busca.area THEN 5 ELSE 0 END AS score_area,
-             CASE WHEN i_busca.vagas IS NOT NULL AND i_oferece.vagas >= i_busca.vagas THEN 5 ELSE 0 END AS score_vagas,
-             CASE WHEN i_busca.frente_mar = true AND i_oferece.frente_mar = true THEN 10 ELSE 0 END AS score_mar,
-             CASE WHEN i_busca.condominio = true AND i_oferece.condominio = true THEN 5 ELSE 0 END AS score_cond,
-             CASE WHEN i_busca.sol IS NOT NULL AND i_busca.sol = i_oferece.sol THEN 5 ELSE 0 END AS score_sol,
-             CASE WHEN i_busca.perto_praia = true AND i_oferece.perto_praia = true THEN 5 ELSE 0 END AS score_praia
-             
-        WITH comprador, m_busca, i_busca, vendedor, m_oferece, i_oferece, b_oferece,
-             (score_base + score_tipo + score_area + score_vagas + score_mar + score_cond + score_sol + score_praia) AS score_final
-             
-        RETURN 
+        WHERE d.status = 'ACTIVE'
+          AND o.status = 'ACTIVE'
+          AND comprador.person_id <> vendedor.person_id
+          AND (d.price IS NULL OR (o.price IS NOT NULL AND o.price <= d.price))
+          AND (d.bedrooms IS NULL OR (i.quartos IS NOT NULL AND i.quartos >= d.bedrooms))
+          AND (coalesce(d.seafront, false) = false OR i.frente_mar = true)
+
+        // collect evita duplicar o mesmo par quando a demanda possui vários bairros.
+        WITH d, o, i, comprador, vendedor, m_busca, m_oferece,
+             collect(DISTINCT b.nome) AS matched_neighborhoods
+
+        // Tipo permanece preferência (comportamento anterior), não hard constraint.
+        // Preço/quartos só pontuam quando os dois lados possuem o dado.
+        WITH d, o, i, comprador, vendedor, m_busca, m_oferece, matched_neighborhoods,
+             CASE WHEN d.price IS NOT NULL AND o.price IS NOT NULL THEN 10 ELSE 0 END
+                 + CASE WHEN d.bedrooms IS NOT NULL AND i.quartos IS NOT NULL THEN 10 ELSE 0 END
+                 + 5 AS score_base,
+             CASE WHEN d.property_type IS NOT NULL AND i.property_type IS NOT NULL
+                       AND d.property_type = i.property_type THEN 5 ELSE 0 END AS score_type,
+             CASE WHEN d.area IS NOT NULL AND i.area IS NOT NULL AND i.area >= d.area
+                       THEN 5 ELSE 0 END AS score_area,
+             CASE WHEN d.parking_spots IS NOT NULL AND i.vagas IS NOT NULL
+                       AND i.vagas >= d.parking_spots THEN 5 ELSE 0 END AS score_parking,
+             CASE WHEN d.seafront = true AND i.frente_mar = true THEN 10 ELSE 0 END AS score_seafront,
+             CASE WHEN d.condominium = true AND i.condominio = true THEN 5 ELSE 0 END AS score_condominium,
+             CASE WHEN d.sun_type IS NOT NULL AND i.sol IS NOT NULL
+                       AND d.sun_type = i.sol THEN 5 ELSE 0 END AS score_sun,
+             CASE WHEN d.nearbeach = true AND i.perto_praia = true THEN 5 ELSE 0 END AS score_nearbeach
+
+        WITH d, o, i, comprador, vendedor, m_busca, m_oferece, matched_neighborhoods,
+             score_base, score_type, score_area, score_parking, score_seafront,
+             score_condominium, score_sun, score_nearbeach,
+             score_base + score_type + score_area + score_parking + score_seafront
+                 + score_condominium + score_sun + score_nearbeach AS score_final
+
+        RETURN
+            d.demand_id AS demand_id,
+            o.offer_id AS offer_id,
+            i.id AS property_id,
+            i.id AS matched_imovel_id,
             comprador.nome AS buyer_name,
             comprador.telefone AS buyer_phone,
             m_busca.id AS buyer_message_id,
@@ -252,8 +277,20 @@ class GraphClient:
             vendedor.nome AS seller_name,
             vendedor.telefone AS seller_phone,
             m_oferece.id AS seller_message_id,
-            i_oferece.id AS matched_imovel_id,
             m_oferece.texto AS seller_text,
+            matched_neighborhoods,
+            d.price AS demand_price,
+            d.bedrooms AS demand_bedrooms,
+            o.price AS offer_price,
+            i.quartos AS property_bedrooms,
+            score_base,
+            score_type,
+            score_area,
+            score_parking,
+            score_seafront,
+            score_condominium,
+            score_sun,
+            score_nearbeach,
             score_final AS score
         ORDER BY score_final DESC
         """
@@ -263,7 +300,11 @@ class GraphClient:
             
             opportunities = []
             for record in result:
+                matched_neighborhoods = record["matched_neighborhoods"] or []
                 opportunities.append({
+                    "demand_id": record["demand_id"],
+                    "offer_id": record["offer_id"],
+                    "property_id": record["property_id"],
                     "buyer_message_id": record["buyer_message_id"],
                     "seller_message_id": record["seller_message_id"],
                     "matched_imovel_id": record["matched_imovel_id"],
@@ -277,7 +318,34 @@ class GraphClient:
                         "phone": record["seller_phone"],
                         "raw_text": record["seller_text"]
                     },
-                    "score": record["score"]
+                    "score": record["score"],
+                    "rule_version": "v1",
+                    "match_details": {
+                        "matched_neighborhood": matched_neighborhoods[0]
+                        if matched_neighborhoods else None,
+                        "matched_neighborhoods": matched_neighborhoods,
+                        "hard_constraints": {
+                            "location": True,
+                            "price": {
+                                "demand_max": record["demand_price"],
+                                "offer_price": record["offer_price"],
+                            },
+                            "bedrooms": {
+                                "demand_min": record["demand_bedrooms"],
+                                "property": record["property_bedrooms"],
+                            },
+                        },
+                        "score_breakdown": {
+                            "base": record["score_base"],
+                            "type": record["score_type"],
+                            "area": record["score_area"],
+                            "parking": record["score_parking"],
+                            "seafront": record["score_seafront"],
+                            "condominium": record["score_condominium"],
+                            "sun": record["score_sun"],
+                            "nearbeach": record["score_nearbeach"],
+                        },
+                    },
                 })
             return opportunities
 

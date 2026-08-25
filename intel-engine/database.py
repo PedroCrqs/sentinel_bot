@@ -148,9 +148,10 @@ def save_opportunities(opportunities_list: list[dict]) -> list[int]:
     """Salva os matches gerados e retorna os IDs das novas oportunidades."""
     query = """
         INSERT INTO opportunities
-            (buyer_message_id, seller_message_id, matched_imovel_id,
-             match_score, match_details, dispatch_status)
-        VALUES (%s, %s, %s, %s, %s, 'PENDING')
+            (demand_id, offer_id, buyer_message_id, seller_message_id,
+             matched_imovel_id, match_score, match_details, rule_version,
+             dispatch_status)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'PENDING')
         ON CONFLICT (buyer_message_id, seller_message_id) DO NOTHING
         RETURNING opportunity_id;
     """
@@ -161,15 +162,19 @@ def save_opportunities(opportunities_list: list[dict]) -> list[int]:
         with conn:
             with conn.cursor() as cursor:
                 for opp in opportunities_list:
+                    demand_id = opp.get("demand_id")
+                    offer_id = opp.get("offer_id")
                     buyer_msg_id = opp.get("buyer_message_id")
                     seller_msg_id = opp.get("seller_message_id")
                     matched_imovel_id = opp.get("matched_imovel_id") 
                     match_score = opp.get("score", 0)
+                    rule_version = opp.get("rule_version", "v1")
                     match_details = Json(opp)
 
                     cursor.execute(query, (
-                        buyer_msg_id, seller_msg_id, matched_imovel_id,
-                        match_score, match_details,
+                        demand_id, offer_id, buyer_msg_id, seller_msg_id,
+                        matched_imovel_id, match_score, match_details,
+                        rule_version,
                     ))
                     
                     # Pega o ID gerado pelo banco se a inserção ocorreu (ignora conflitos)

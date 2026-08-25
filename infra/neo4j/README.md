@@ -21,11 +21,12 @@ Browser: http://localhost:7474
 
 ## Apply identity constraints
 
-The bootstrap is repeatable and does not delete graph data. With the password
-available in the local shell, run:
+The bootstrap is repeatable and does not delete graph data. Copy the versioned
+file into the running container, then execute it with the local password:
 
 ```bash
-docker exec sentinel-neo4j cypher-shell -u neo4j -p "$NEO4J_PASSWORD" -f /var/lib/neo4j/import/constraints.cypher
+docker cp infra/neo4j/constraints.cypher sentinel-neo4j:/tmp/constraints.cypher
+docker exec sentinel-neo4j cypher-shell -u neo4j -p "$NEO4J_PASSWORD" -f /tmp/constraints.cypher
 ```
 
 On PowerShell, use `$env:NEO4J_PASSWORD` in place of `$NEO4J_PASSWORD`.

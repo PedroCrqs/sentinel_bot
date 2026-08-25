@@ -10,16 +10,24 @@ from pathlib import Path
 load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
 
+try:
+    from neo4j import GraphDatabase
+    from neo4j.exceptions import ConstraintError
+
+    NEO4J_DRIVER_AVAILABLE = True
+except (ImportError, ModuleNotFoundError):
+    GraphDatabase = None
+    ConstraintError = None
+    NEO4J_DRIVER_AVAILABLE = False
+
+
 @unittest.skipUnless(
-    os.getenv("RUN_NEO4J_INTEGRATION") == "1",
-    "set RUN_NEO4J_INTEGRATION=1 to run against local Neo4j",
+    os.getenv("RUN_NEO4J_INTEGRATION") == "1" and NEO4J_DRIVER_AVAILABLE,
+    "set RUN_NEO4J_INTEGRATION=1 and install the neo4j Python driver",
 )
 class Neo4jIntegrationTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        from neo4j import GraphDatabase
-        from neo4j.exceptions import ConstraintError
-
         cls.constraint_error = ConstraintError
         cls.driver = GraphDatabase.driver(
             os.environ["NEO4J_URI"],

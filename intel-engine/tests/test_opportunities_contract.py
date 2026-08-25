@@ -24,7 +24,7 @@ class FakeCursor:
 
     def execute(self, query, params):
         self.executions.append((query, params))
-        self.current_key = (params[0], params[1])
+        self.current_key = (params[2], params[3])
 
     def fetchone(self):
         if self.current_key in self.seen_keys:
@@ -88,6 +88,9 @@ class OpportunitiesContractTests(unittest.TestCase):
 
     def test_existing_save_contract_matches_migration(self):
         self.assertIn("seller_message_id", self.database_source)
+        self.assertIn("demand_id", self.database_source)
+        self.assertIn("offer_id", self.database_source)
+        self.assertIn("rule_version", self.database_source)
         self.assertIn("match_details", self.database_source)
         self.assertIn(
             "ON CONFLICT (buyer_message_id, seller_message_id)",
@@ -105,10 +108,13 @@ class OpportunitiesContractTests(unittest.TestCase):
             database = importlib.import_module("database")
             try:
                 opportunity = {
+                    "demand_id": "demand-1",
+                    "offer_id": "offer-1",
                     "buyer_message_id": "buyer-1",
                     "seller_message_id": "seller-1",
                     "matched_imovel_id": 42,
                     "score": 35,
+                    "rule_version": "v1",
                     "buyer": {"name": "Buyer"},
                 }
                 inserted = database.save_opportunities([opportunity, opportunity])
@@ -120,7 +126,8 @@ class OpportunitiesContractTests(unittest.TestCase):
         self.assertIn(
             "ON CONFLICT (buyer_message_id, seller_message_id)", query
         )
-        self.assertIn('"buyer_message_id": "buyer-1"', params[4].getquoted().decode())
+        self.assertEqual(params[:4], ("demand-1", "offer-1", "buyer-1", "seller-1"))
+        self.assertIn('"buyer_message_id": "buyer-1"', params[6].getquoted().decode())
 
     def test_egress_reads_details_and_updates_dispatch(self):
         self.assertIn(

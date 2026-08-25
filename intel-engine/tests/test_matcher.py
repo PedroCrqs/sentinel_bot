@@ -33,6 +33,8 @@ class FakeSession:
 
     def run(self, query, **params):
         self.queries.append((query, params))
+        if "MATCH (d:Demanda)" in query:
+            return self.store["matching_records"]
         if "MATCH (comprador:Pessoa)" in query:
             return []
 
@@ -100,6 +102,7 @@ class FakeDriver:
             "Oferta": {},
             "Imovel": {},
             "relationships": set(),
+            "matching_records": [],
         }
         self.sessions = []
 
@@ -293,8 +296,104 @@ class CanonicalIdentityTests(unittest.TestCase):
     def test_matching_compares_person_id(self):
         self.client.match_opportunities()
         query = self.driver.sessions[-1].queries[0][0]
+        self.assertIn("d:Demanda", query)
+        self.assertIn("o:Oferta", query)
+        self.assertIn("d.status = 'ACTIVE'", query)
+        self.assertIn("o.status = 'ACTIVE'", query)
         self.assertIn("comprador.person_id <> vendedor.person_id", query)
-        self.assertNotIn("comprador.telefone <> vendedor.telefone", query)
+        self.assertNotIn("m_busca:Mensagem)-[:BUSCA]->", query)
+        self.assertNotIn("m_oferece:Mensagem)-[:OFERECE]->", query)
+
+
+def matching_record(neighborhoods=None, score=35):
+    return {
+        "demand_id": "demand-1",
+        "offer_id": "offer-1",
+        "property_id": "property-1",
+        "matched_imovel_id": "property-1",
+        "buyer_name": "Buyer",
+        "buyer_phone": "5511",
+        "buyer_message_id": "message-buy",
+        "buyer_text": "Procuro apartamento",
+        "seller_name": "Seller",
+        "seller_phone": "5522",
+        "seller_message_id": "message-sell",
+        "seller_text": "Vendo apartamento",
+        "matched_neighborhoods": neighborhoods or ["Pituba"],
+        "demand_price": 800000,
+        "demand_bedrooms": 3,
+        "offer_price": 750000,
+        "property_bedrooms": 3,
+        "score_base": 25,
+        "score_type": 5,
+        "score_area": 0,
+        "score_parking": 0,
+        "score_seafront": 0,
+        "score_condominium": 0,
+        "score_sun": 0,
+        "score_nearbeach": 0,
+        "score": score,
+    }
+
+
+class DomainMatchingTests(unittest.TestCase):
+    def setUp(self):
+        self.driver = FakeDriver()
+        self.original_driver = neo4j_client.GraphDatabase.driver
+        self.original_env = {
+            key: os.environ.get(key)
+            for key in ("NEO4J_URI", "NEO4J_USERNAME", "NEO4J_PASSWORD")
+        }
+        os.environ.update(
+            {
+                "NEO4J_URI": "bolt://test",
+                "NEO4J_USERNAME": "neo4j",
+                "NEO4J_PASSWORD": "test-password",
+            }
+        )
+        neo4j_client.GraphDatabase.driver = lambda *args, **kwargs: self.driver
+        self.client = neo4j_client.GraphClient()
+
+    def tearDown(self):
+        self.client.close()
+        neo4j_client.GraphDatabase.driver = self.original_driver
+        for key, value in self.original_env.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+    def test_compatible_demand_and_offer_returns_canonical_ids(self):
+        self.driver.store["matching_records"] = [matching_record()]
+
+        opportunities = self.client.match_opportunities()
+
+        self.assertEqual(len(opportunities), 1)
+        self.assertEqual(opportunities[0]["demand_id"], "demand-1")
+        self.assertEqual(opportunities[0]["offer_id"], "offer-1")
+        self.assertEqual(opportunities[0]["property_id"], "property-1")
+        self.assertEqual(opportunities[0]["buyer_message_id"], "message-buy")
+        self.assertEqual(opportunities[0]["seller_message_id"], "message-sell")
+        self.assertEqual(
+            opportunities[0]["match_details"]["matched_neighborhood"], "Pituba"
+        )
+
+    def test_multineighborhood_match_preserves_matching_locations(self):
+        self.driver.store["matching_records"] = [
+            matching_record(["Pituba", "Itaigara"])
+        ]
+
+        opportunities = self.client.match_opportunities()
+
+        self.assertEqual(
+            opportunities[0]["match_details"]["matched_neighborhoods"],
+            ["Pituba", "Itaigara"],
+        )
+
+    def test_incompatible_candidate_produces_no_opportunity(self):
+        self.driver.store["matching_records"] = []
+
+        self.assertEqual(self.client.match_opportunities(), [])
 
 
 if __name__ == "__main__":
