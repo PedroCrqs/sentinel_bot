@@ -65,6 +65,12 @@ class InventoryAdapterTests(unittest.TestCase):
         with self.assertRaisesRegex(InventoryAdapterError, "Unknown inventory status"):
             map_inventory_row(inventory_row(imovelstatus="???"))
 
+    def test_schema_allowed_unavailable_statuses_are_not_available(self):
+        for status in ("Alugado", "Retirado de Venda"):
+            with self.subTest(status=status):
+                mapped = map_inventory_row(inventory_row(imovelstatus=status))
+                self.assertEqual(mapped["status"], "unavailable")
+
 
 if __name__ == "__main__":
     unittest.main()

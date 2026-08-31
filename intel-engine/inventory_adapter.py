@@ -15,6 +15,8 @@ _UNAVAILABLE_STATUS = {
     "indisponivel",
     "unavailable",
     "vendido",
+    "alugado",
+    "retirado de venda",
     "reservado",
     "inativo",
     "inactive",
