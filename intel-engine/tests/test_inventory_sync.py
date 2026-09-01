@@ -6,6 +6,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from inventory_sync import classify_diff, fingerprint_property, sync_inventory
+from inventory_sync_worker import run_worker
+import threading
 
 
 def prop(property_id=1, **overrides):
@@ -174,6 +176,53 @@ class EngineDecouplingTests(unittest.TestCase):
         self.assertNotIn("get_property_details", process_source)
         self.assertNotIn("get_inventory_snapshot", process_source)
         self.assertNotIn("sync_inventory", process_source)
+
+
+class WorkerTests(unittest.TestCase):
+    def test_worker_runs_immediately_then_waits_without_overlap(self):
+        stop_event = threading.Event()
+        calls = []
+        active = 0
+        maximum = 0
+
+        def run_once():
+            nonlocal active, maximum
+            active += 1
+            maximum = max(maximum, active)
+            calls.append("sync")
+            active -= 1
+
+        def sleep(_interval):
+            calls.append("wait")
+            if len(calls) == 2:
+                stop_event.set()
+
+        run_worker(run_once, 300, stop_event, sleep=sleep)
+        self.assertEqual(calls, ["sync", "wait"])
+        self.assertEqual(maximum, 1)
+
+    def test_worker_survives_transient_failure_and_retries(self):
+        stop_event = threading.Event()
+        attempts = []
+
+        def run_once():
+            attempts.append(1)
+            if len(attempts) == 1:
+                raise RuntimeError("temporary")
+
+        def sleep(_interval):
+            if len(attempts) == 2:
+                stop_event.set()
+
+        run_worker(run_once, 1, stop_event, sleep=sleep)
+        self.assertEqual(len(attempts), 2)
+
+    def test_worker_shutdown_before_start_runs_no_cycle(self):
+        stop_event = threading.Event()
+        stop_event.set()
+        calls = []
+        run_worker(lambda: calls.append(1), 1, stop_event, sleep=lambda _: None)
+        self.assertEqual(calls, [])
 
 
 if __name__ == "__main__":

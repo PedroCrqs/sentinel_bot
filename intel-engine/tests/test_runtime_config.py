@@ -1,6 +1,13 @@
 import unittest
 
-from runtime_config import database_settings, rabbitmq_url, required_config
+from runtime_config import (
+    database_settings,
+    inventory_sync_enabled,
+    inventory_sync_interval_seconds,
+    rabbitmq_url,
+    required_config,
+    validated_database_settings,
+)
 
 
 class RuntimeConfigurationTests(unittest.TestCase):
@@ -25,6 +32,21 @@ class RuntimeConfigurationTests(unittest.TestCase):
         self.assertEqual(settings["user"], "postgres")
         self.assertEqual(settings["host"], "localhost")
         self.assertEqual(settings["port"], "5432")
+
+    def test_database_without_credentials_fails_explicitly(self):
+        with self.assertRaisesRegex(ValueError, "DATABASE_URL"):
+            validated_database_settings({})
+
+    def test_inventory_sync_runtime_defaults_and_validation(self):
+        self.assertTrue(inventory_sync_enabled({}))
+        self.assertEqual(inventory_sync_interval_seconds({}), 300)
+        self.assertFalse(inventory_sync_enabled({"INVENTORY_SYNC_ENABLED": "false"}))
+        self.assertEqual(
+            inventory_sync_interval_seconds({"INVENTORY_SYNC_INTERVAL_SECONDS": "30"}),
+            30,
+        )
+        with self.assertRaisesRegex(ValueError, "positive integer"):
+            inventory_sync_interval_seconds({"INVENTORY_SYNC_INTERVAL_SECONDS": "0"})
 
     def test_rabbitmq_requires_amqp_url(self):
         self.assertEqual(rabbitmq_url({}), "amqp://localhost:5672")

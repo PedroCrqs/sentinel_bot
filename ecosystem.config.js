@@ -47,5 +47,15 @@ module.exports = {
       restart_delay: 5000,
       watch: false,
     },
+    {
+      name: "sentinel-inventory-sync", // snapshot/diff independente do processamento de mensagens
+      script: "inventory_sync_worker.py",
+      interpreter: path.join(__dirname, ".venv", ...pythonPath),
+      cwd: path.join(__dirname, "intel-engine"),
+      autorestart: true,
+      max_restarts: 15,
+      restart_delay: 5000,
+      watch: false,
+    },
   ],
 };

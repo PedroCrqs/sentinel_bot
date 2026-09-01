@@ -1,5 +1,6 @@
 import unittest
 import importlib
+import os
 import sys
 from pathlib import Path
 from unittest.mock import patch
@@ -104,8 +105,9 @@ class OpportunitiesContractTests(unittest.TestCase):
         pool = FakePool(connection)
 
         with patch("psycopg2.pool.SimpleConnectionPool", return_value=pool):
-            sys.modules.pop("database", None)
-            database = importlib.import_module("database")
+            with patch.dict(os.environ, {"POSTGRES_PASSWORD": "test-only"}, clear=False):
+                sys.modules.pop("database", None)
+                database = importlib.import_module("database")
             try:
                 opportunity = {
                     "demand_id": "demand-1",

@@ -183,4 +183,17 @@ idempotente e replay seguro.
 
 Não criar worker, scheduler, RabbitMQ inventory events ou triggers nesta
 tarefa. O agendamento periódico permanece separado; o sincronizador atual é
-callable e manual.
+ callable e manual. A execução periódica é feita pelo processo dedicado
+ `inventory_sync_worker.py`, gerenciado pelo PM2. Ele executa imediatamente,
+ aguarda `INVENTORY_SYNC_INTERVAL_SECONDS` (default 300) e tenta novamente após
+ falhas transitórias de PostgreSQL ou Neo4j. `INVENTORY_SYNC_ENABLED=false`
+ desabilita o worker sem alterar o restante do pipeline.
+
+ O worker é single-threaded: um ciclo termina antes que o próximo comece. Ele
+ trata SIGINT/SIGTERM e encerra sem iniciar novo ciclo. O `.env` local deve
+ fornecer `DATABASE_URL`; credenciais não são defaults de código. O processo
+ não registra URLs ou senhas.
+
+Esta seção atualiza a decisão anterior: o worker agora existe como processo
+dedicado, mas scheduler externo, eventos RabbitMQ e triggers continuam fora do
+escopo.

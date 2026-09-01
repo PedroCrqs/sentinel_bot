@@ -26,6 +26,40 @@ def database_settings(environ=None):
     }
 
 
+def validated_database_settings(environ=None):
+    """Return settings and reject an unconfigured password fallback."""
+    settings = database_settings(environ)
+    env = os.environ if environ is None else environ
+    if "dsn" in settings:
+        return settings
+    if not (env.get("POSTGRES_PASSWORD") or "").strip():
+        raise ValueError(
+            "Missing required configuration: DATABASE_URL "
+            "(or POSTGRES_PASSWORD for legacy fallback)"
+        )
+    return settings
+
+
+def inventory_sync_interval_seconds(environ=None):
+    env = os.environ if environ is None else environ
+    raw = (env.get("INVENTORY_SYNC_INTERVAL_SECONDS") or "300").strip()
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise ValueError("INVENTORY_SYNC_INTERVAL_SECONDS must be a positive integer") from exc
+    if value <= 0:
+        raise ValueError("INVENTORY_SYNC_INTERVAL_SECONDS must be a positive integer")
+    return value
+
+
+def inventory_sync_enabled(environ=None):
+    env = os.environ if environ is None else environ
+    value = (env.get("INVENTORY_SYNC_ENABLED") or "true").strip().lower()
+    if value not in {"true", "false", "1", "0", "yes", "no"}:
+        raise ValueError("INVENTORY_SYNC_ENABLED must be true or false")
+    return value in {"true", "1", "yes"}
+
+
 def rabbitmq_url(environ=None):
     """Return RabbitMQ as an AMQP URL, rejecting the old bare-host format."""
     env = os.environ if environ is None else environ

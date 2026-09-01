@@ -6,14 +6,14 @@ import time
 from psycopg2.pool import SimpleConnectionPool
 
 from psycopg2.extras import Json, RealDictCursor
-from runtime_config import database_settings
+from runtime_config import validated_database_settings
 from inventory_adapter import map_inventory_row
 
 # Inicialização do Pool de Conexões (min=1, max=10 conexões por exemplo)
 db_pool = SimpleConnectionPool(
     minconn=1,
     maxconn=10,
-    **database_settings(),
+    **validated_database_settings(),
 )
 
 def get_db_connection():
