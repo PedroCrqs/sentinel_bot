@@ -188,6 +188,28 @@ def update_message_status(message_id: str, status: str, normalized_data: dict | 
         release_db_connection(conn)
 
 
+def _resolve_matched_imovel_id(opportunity: dict):
+    """Keep the legacy integer reference only for owned-inventory offers.
+
+    External WhatsApp offers have canonical ``offer_id`` values but do not
+    belong to ``public.imoveis``. Their property identity must not be cast to
+    the legacy integer FK column.
+    """
+    offer_id = opportunity.get("offer_id")
+    if not isinstance(offer_id, str) or not offer_id.startswith("self-offer:"):
+        return None
+
+    property_id = opportunity.get("property_id")
+    if property_id is None:
+        return None
+    try:
+        return int(property_id)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "Owned-inventory opportunity requires an integer property_id"
+        ) from exc
+
+
 def save_opportunities(opportunities_list: list[dict]) -> list[int]:
     """Salva os matches gerados e retorna os IDs das novas oportunidades."""
     query = """
@@ -210,7 +232,7 @@ def save_opportunities(opportunities_list: list[dict]) -> list[int]:
                     offer_id = opp.get("offer_id")
                     buyer_msg_id = opp.get("buyer_message_id")
                     seller_msg_id = opp.get("seller_message_id")
-                    matched_imovel_id = opp.get("matched_imovel_id") 
+                    matched_imovel_id = _resolve_matched_imovel_id(opp)
                     match_score = opp.get("score", 0)
                     rule_version = opp.get("rule_version", "v1")
                     match_details = Json(opp)

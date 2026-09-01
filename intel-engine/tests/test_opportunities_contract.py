@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
 MIGRATION = ROOT / "migrations" / "001_align_opportunities_contract.sql"
+MIGRATION_003 = ROOT / "migrations" / "003_relax_opportunity_property_reference.sql"
 DATABASE_MODULE = ROOT / "intel-engine" / "database.py"
 EGRESS_MODULE = ROOT / "wpp-egress" / "main.js"
 
@@ -66,6 +67,7 @@ class OpportunitiesContractTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.migration = MIGRATION.read_text(encoding="utf-8")
+        cls.migration_003 = MIGRATION_003.read_text(encoding="utf-8")
         cls.database_source = DATABASE_MODULE.read_text(encoding="utf-8")
         cls.egress_source = EGRESS_MODULE.read_text(encoding="utf-8")
 
@@ -86,6 +88,18 @@ class OpportunitiesContractTests(unittest.TestCase):
         self.assertIn("ADD COLUMN IF NOT EXISTS DEMAND_ID VARCHAR", sql)
         self.assertIn("ADD COLUMN IF NOT EXISTS OFFER_ID VARCHAR", sql)
         self.assertIn("RULE_VERSION VARCHAR NOT NULL DEFAULT 'V1'", sql)
+
+    def test_migration_003_removes_only_legacy_property_fk(self):
+        sql = self.migration_003.upper()
+
+        self.assertIn(
+            "DROP CONSTRAINT IF EXISTS OPPORTUNITIES_MATCHED_IMOVEL_ID_FKEY",
+            sql,
+        )
+        self.assertIn("ALTER COLUMN MATCHED_IMOVEL_ID DROP NOT NULL", sql)
+        self.assertNotIn("DROP TABLE", sql)
+        self.assertNotIn("DELETE FROM", sql)
+        self.assertNotIn("TRUNCATE", sql)
 
     def test_existing_save_contract_matches_migration(self):
         self.assertIn("seller_message_id", self.database_source)
@@ -130,6 +144,55 @@ class OpportunitiesContractTests(unittest.TestCase):
         )
         self.assertEqual(params[:4], ("demand-1", "offer-1", "buyer-1", "seller-1"))
         self.assertIn('"buyer_message_id": "buyer-1"', params[6].getquoted().decode())
+
+    def test_external_offer_does_not_cast_property_id_to_legacy_integer(self):
+        cursor = FakeCursor()
+        connection = FakeConnection(cursor)
+        pool = FakePool(connection)
+
+        with patch("psycopg2.pool.SimpleConnectionPool", return_value=pool):
+            with patch.dict(os.environ, {"POSTGRES_PASSWORD": "test-only"}, clear=False):
+                sys.modules.pop("database", None)
+                database = importlib.import_module("database")
+            try:
+                inserted = database.save_opportunities([{
+                    "demand_id": "demand-external",
+                    "offer_id": "external-offer-abc",
+                    "property_id": "msg-123_imovel",
+                    "buyer_message_id": "buyer-external",
+                    "seller_message_id": "seller-external",
+                    "score": 35,
+                }])
+            finally:
+                sys.modules.pop("database", None)
+
+        self.assertEqual(inserted, [123])
+        _, params = cursor.executions[0]
+        self.assertIsNone(params[4])
+
+    def test_owned_inventory_offer_keeps_integer_property_reference(self):
+        cursor = FakeCursor()
+        connection = FakeConnection(cursor)
+        pool = FakePool(connection)
+
+        with patch("psycopg2.pool.SimpleConnectionPool", return_value=pool):
+            with patch.dict(os.environ, {"POSTGRES_PASSWORD": "test-only"}, clear=False):
+                sys.modules.pop("database", None)
+                database = importlib.import_module("database")
+            try:
+                database.save_opportunities([{
+                    "demand_id": "demand-owned",
+                    "offer_id": "self-offer:123",
+                    "property_id": "123",
+                    "buyer_message_id": "buyer-owned",
+                    "seller_message_id": "seller-owned",
+                    "score": 35,
+                }])
+            finally:
+                sys.modules.pop("database", None)
+
+        _, params = cursor.executions[0]
+        self.assertEqual(params[4], 123)
 
     def test_egress_reads_details_and_updates_dispatch(self):
         self.assertIn(
