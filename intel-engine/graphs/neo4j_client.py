@@ -69,6 +69,15 @@ def _resolve_offer_id(original: dict, message_id: str) -> str:
 
     return _require_identity(original.get("offer_id", message_id), "Oferta.offer_id")
 
+
+def _inventory_offer_status(ad_data: dict) -> str:
+    status = ad_data.get("status")
+    if status == "available":
+        return "ACTIVE"
+    if status == "unavailable":
+        return "INACTIVE"
+    raise ValueError(f"Unknown canonical inventory status: {status!r}")
+
 class GraphClient:
     def __init__(self):
         uri = required_config("NEO4J_URI")
@@ -169,7 +178,7 @@ class GraphClient:
             MERGE (o:Oferta {offer_id: $offer_id})
             ON CREATE SET o.created_at = $created_at
             SET o.price = $preco,
-                o.status = 'ACTIVE'
+                o.status = $offer_status
             MERGE (p)-[:PUBLICOU]->(o)
             MERGE (m)-[:ORIGINA]->(o)
             MERGE (o)-[:REFERE_SE_A]->(i)
@@ -198,7 +207,27 @@ class GraphClient:
                 bairros=bairros,
                 demand_id=demand_id,
                 offer_id=offer_id,
-                created_at=original.get("timestamp", 0)
+                created_at=original.get("timestamp", 0),
+                offer_status=(
+                    _inventory_offer_status(ad_data)
+                    if original.get("source") == "inventory"
+                    else "ACTIVE"
+                )
+            )
+
+    def deactivate_inventory_property(self, property_id):
+        """Deactivate an inventory offer without deleting its property node."""
+        property_id = _require_identity(property_id, "ImovelID do inventÃ¡rio")
+        query = """
+        MATCH (i:Imovel {id: $property_id})
+        OPTIONAL MATCH (o:Oferta {offer_id: $offer_id})-[:REFERE_SE_A]->(i)
+        SET o.status = 'INACTIVE'
+        """
+        with self.driver.session() as session:
+            session.run(
+                query,
+                property_id=property_id,
+                offer_id=f"self-offer:{property_id}",
             )
 
     def match_opportunities(self):

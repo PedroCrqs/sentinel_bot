@@ -188,6 +188,7 @@ class CanonicalIdentityTests(unittest.TestCase):
     def test_inventory_property_is_updated_without_duplication(self):
         ad = external_ad(person_id="system:majesto", message_id="self-42", phone=None)
         ad["original_content"].update({"imovel_id": 42, "source": "inventory"})
+        ad["status"] = "available"
         self.client.ingest_ad(ad)
         ad["price"] = 350000
         self.client.ingest_ad(ad)
@@ -287,6 +288,7 @@ class CanonicalIdentityTests(unittest.TestCase):
     def test_inventory_uses_stable_offer_identity(self):
         ad = external_ad(person_id="system:majesto", message_id="self-42", phone=None)
         ad["original_content"].update({"imovel_id": 42, "source": "inventory"})
+        ad["status"] = "available"
         self.client.ingest_ad(ad)
         self.client.ingest_ad(ad)
 

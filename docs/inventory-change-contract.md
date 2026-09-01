@@ -152,9 +152,35 @@ full snapshot + snapshot/diff periódico
 O estado do diff deve ser Sentinel-owned e conter somente campos relevantes,
 por exemplo `property_id`, fingerprint, status e `last_seen`.
 
+## Implementação snapshot/diff
+
+O estado Sentinel-owned é mantido em `inventory_sync_state`. O checkpoint
+lógico é a combinação de `property_id`, `fingerprint`, `source_status`,
+`is_present` e `last_synced_at`; não existe cursor artificial baseado em
+`auditoria_imoveis.logid`.
+
+O comando manual é:
+
+```text
+python inventory_sync.py sync
+python inventory_sync.py full-rebuild
+```
+
+O snapshot lê todos os status de `public.imoveis`. Apenas propriedades
+`NEW`, `CHANGED` e `REAPPEARED` são reprojetadas. Propriedades `UNCHANGED` não
+são enviadas ao Neo4j. Ausências são marcadas `MISSING` somente após a leitura
+completa do snapshot e desativam a Oferta sem apagar o Imóvel.
+
+O modo `full-rebuild` força a reprojeção dos imóveis presentes, útil quando o
+Neo4j foi recriado embora o estado Sentinel ainda exista.
+
+Falha no PostgreSQL aborta o ciclo antes da classificação de ausências. Falha
+no Neo4j impede a atualização do estado correspondente. Como não há transação
+distribuída, a consistência é `at-least-once projection` com `MERGE`/`SET`
+idempotente e replay seguro.
+
 ## Decisão de implementação
 
-Não criar `sync_checkpoints`, worker, scheduler, RabbitMQ inventory events ou
-triggers nesta tarefa. A MicroTask 1.0 só poderá implementar cursor incremental
-depois que o proprietário do inventário confirmar o contrato de mudança e a
-cobertura dos campos relevantes.
+Não criar worker, scheduler, RabbitMQ inventory events ou triggers nesta
+tarefa. O agendamento periódico permanece separado; o sincronizador atual é
+callable e manual.

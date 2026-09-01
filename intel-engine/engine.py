@@ -9,7 +9,6 @@ from runtime_config import rabbitmq_url
 
 from database import (
     get_message_by_id,
-    get_property_details, 
     update_message_status, 
     save_opportunities
 )
@@ -32,12 +31,11 @@ def process_message(ch, method, properties, body):
         # 1. Processamento NLP (Transforma a mensagem única numa lista para manter compatibilidade)
         sellers, buyers, useless = run_classifier([msg_data])
         sellers_pad, buyers_pad = run_normalizer(sellers, buyers)
-        self_ads = get_property_details()
 
         # 2. Ingestão e Matching no Grafo (Neo4j)
         graph = GraphClient()
         try:
-            for ad in sellers_pad + buyers_pad + self_ads:
+            for ad in sellers_pad + buyers_pad:
                 graph.ingest_ad(ad)
             
             opportunities = graph.match_opportunities() 

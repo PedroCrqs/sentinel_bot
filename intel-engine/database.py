@@ -64,6 +64,31 @@ def get_available_properties() -> list[dict]:
     return [map_inventory_row(row) for row in rows]
 
 
+def get_inventory_snapshot() -> list[dict]:
+    """Read all external inventory rows as canonical Sentinel properties.
+
+    Database errors propagate because an incomplete snapshot must never mark
+    existing properties as missing.
+    """
+    query = """
+        SELECT i.imovelid, i.tipologia, i.quartos, i.vagas, i.valor,
+               i.metragem, i.sol, i.bairroid, i.imovelstatus,
+               i.descricao, i.datacadastro, b.nome AS bairro_nome
+        FROM public.imoveis AS i
+        LEFT JOIN public.bairros AS b ON b.bairroid = i.bairroid
+    """
+    conn = None
+    try:
+        conn = get_db_connection()
+        with conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+                cursor.execute(query)
+                rows = [dict(row) for row in cursor.fetchall()]
+        return [map_inventory_row(row) for row in rows]
+    finally:
+        release_db_connection(conn)
+
+
 def get_property_details() -> list[dict]:
     """
     Retorna os imóveis próprios estruturados diretamente para a ingestão do Neo4j,
