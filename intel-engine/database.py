@@ -183,6 +183,7 @@ def update_message_status(message_id: str, status: str, normalized_data: dict | 
             conn.commit()
     except Exception as e:
         print(f"[ERRO BANCO] Falha ao atualizar status da mensagem {message_id}: {e}")
+        raise
     finally:
         release_db_connection(conn)
 
@@ -228,7 +229,7 @@ def save_opportunities(opportunities_list: list[dict]) -> list[int]:
         return inserted_ids
     except Exception as e:
         print(f"[ERRO BANCO] Falha ao salvar oportunidades: {e}")
-        return []
+        raise
     finally:
         release_db_connection(conn)
 
@@ -246,6 +247,6 @@ def get_message_by_id(message_id: str) -> dict | None:
                 return dict(row) if row else None
     except Exception as e:
         print(f"[ERRO BANCO] Falha ao buscar mensagem {message_id}: {e}")
-        return None
+        raise
     finally:
         release_db_connection(conn)
