@@ -3,10 +3,10 @@ const path = require("path");
 const qrcode = require("qrcode-terminal");
 const { Client, LocalAuth } = require("whatsapp-web.js");
 const { Pool } = require("pg");
-const amqplib = require("amqplib"); // <-- NOVO: Biblioteca do RabbitMQ
+const amqplib = require("amqplib");
 
 // Aponta para o arquivo .env na raiz do projeto
-require("dotenv").config({ path: path.resolve(__dirname, '../.env') });
+require("dotenv").config({ path: path.resolve(__dirname, "../.env") });
 
 // Configuração do RabbitMQ
 const RABBITMQ_URL = process.env.RABBITMQ_URL || "amqp://localhost:5672";
@@ -20,12 +20,28 @@ const pool = new Pool({
 
 const SESSION_PATH = path.join(__dirname, "session");
 
+// Destinatários
 const GROUP_ID = process.env.GROUP_ID || "";
-// Imóveis próprios: notificação prioritária vai direto por DM, não pro grupo
 const PRIORITY_CONTACT_ID = process.env.PRIORITY_CONTACT_ID || "";
 
+// Rate Limit para oportunidades de terceiros enviadas ao grupo
+// Padrão: no máximo 10 mensagens por hora para não poluir o grupo
+const MAX_GROUP_OPPS_PER_HOUR = parseInt(
+  process.env.MAX_GROUP_OPPS_PER_HOUR || "10",
+  10
+);
+const groupSentTimestamps = [];
+
 if (!GROUP_ID) {
-  throw new Error("Missing required configuration: GROUP_ID");
+  console.warn(
+    "⚠️ [CONFIG] GROUP_ID não configurado no .env. As mensagens para o grupo ficarão em espera."
+  );
+}
+
+if (!PRIORITY_CONTACT_ID) {
+  console.warn(
+    "⚠️ [CONFIG] PRIORITY_CONTACT_ID não configurado no .env. Imóveis próprios usarão fallback para GROUP_ID se disponível."
+  );
 }
 
 if (!fs.existsSync(SESSION_PATH)) {
@@ -50,13 +66,38 @@ client.on("authenticated", () => {
   console.log("=".repeat(80));
 });
 
-client.once("ready", () => {
+client.once("ready", async () => {
   console.log("=".repeat(80));
-  console.log("SENTINEL EGRESS RUNNING (RabbitMQ Worker)");
+  console.log("SENTINEL EGRESS RUNNING (RabbitMQ Worker v2.0.0)");
   console.log("=".repeat(80));
-  
-  // Inicia o consumidor do RabbitMQ em vez do polling no banco
+
+  // Lista todos os chats e grupos para facilitar a captura de IDs
+  try {
+    const chats = await client.getChats();
+    const groups = chats.filter((c) => c.isGroup);
+    console.log(`📋 [CHATS DISPONÍVEIS] ${groups.length} grupo(s) encontrados na conta:`);
+    groups.forEach((g) => {
+      console.log(`   👉 Grupo: "${g.name}" | ID: ${g.id._serialized}`);
+    });
+  } catch (err) {
+    console.warn("[EGRESS] Não foi possível listar chats na inicialização:", err.message);
+  }
+
+  // Inicia o consumidor do RabbitMQ
   startRabbitMQConsumer();
+});
+
+// Listener ao vivo: imprime o ID de qualquer chat que enviar mensagem
+client.on("message", async (message) => {
+  try {
+    const chat = await message.getChat();
+    const tipo = chat.isGroup ? "GRUPO" : "DM PRIVADA";
+    console.log(
+      `📌 [ID DETECTADO - ${tipo}] Nome: "${chat.name}" | ID: ${chat.id._serialized}`
+    );
+  } catch (err) {
+    // Silencioso
+  }
 });
 
 client.on("disconnected", (reason) => {
@@ -72,17 +113,66 @@ client.on("auth_failure", (msg) => {
 });
 
 // ============================================================================
+// Identificador de Imóvel Próprio vs Imóvel de Terceiro
+// ============================================================================
+function isSelfOpportunity(opp) {
+  if (opp.offer_id && String(opp.offer_id).startsWith("self-offer:")) {
+    return true;
+  }
+  if (opp.matched_imovel_id !== null && opp.matched_imovel_id !== undefined) {
+    return true;
+  }
+  if (
+    opp.seller &&
+    opp.seller.name &&
+    String(opp.seller.name).includes("Majesto")
+  ) {
+    return true;
+  }
+  return false;
+}
+
+// ============================================================================
+// Controle de Fluxo por Hora para o Grupo
+// ============================================================================
+async function checkAndApplyGroupRateLimit() {
+  const ONE_HOUR_MS = 60 * 60 * 1000;
+  const now = Date.now();
+
+  // Limpa registros mais antigos que 1 hora
+  while (
+    groupSentTimestamps.length > 0 &&
+    now - groupSentTimestamps[0] >= ONE_HOUR_MS
+  ) {
+    groupSentTimestamps.shift();
+  }
+
+  // Se atingiu a cota máxima na última hora, aguarda a liberação da vaga mais antiga
+  if (groupSentTimestamps.length >= MAX_GROUP_OPPS_PER_HOUR) {
+    const oldestTimestamp = groupSentTimestamps[0];
+    const waitTimeMs = ONE_HOUR_MS - (now - oldestTimestamp) + 1000;
+    console.log(
+      `⏳ [RATE LIMIT GRUPO] Limite de ${MAX_GROUP_OPPS_PER_HOUR} envios/hora atingido. Aguardando ${Math.ceil(
+        waitTimeMs / 1000
+      )}s para despachar o próximo...`
+    );
+    await new Promise((resolve) => setTimeout(resolve, waitTimeMs));
+    return checkAndApplyGroupRateLimit();
+  }
+
+  groupSentTimestamps.push(Date.now());
+}
+
+// ============================================================================
 // Consumidor Orientado a Eventos do RabbitMQ
 // ============================================================================
 async function startRabbitMQConsumer() {
   try {
     const connection = await amqplib.connect(RABBITMQ_URL);
     const channel = await connection.createChannel();
-    
+
     await channel.assertQueue("opportunities_queue", { durable: true });
-    
-    // Garante que o worker processe apenas 1 envio por vez para respeitar o rate-limit do WhatsApp
-    channel.prefetch(1); 
+    channel.prefetch(1);
 
     console.log("🐰 [RABBITMQ] Escutando a fila 'opportunities_queue'...");
 
@@ -92,7 +182,7 @@ async function startRabbitMQConsumer() {
         const oppId = payload.opportunity_id;
 
         try {
-          // Busca os detalhes da oportunidade recém-criada direto no banco
+          // Busca os detalhes da oportunidade direto no banco
           const res = await pool.query(
             "SELECT match_details FROM opportunities WHERE opportunity_id = $1",
             [oppId]
@@ -100,47 +190,83 @@ async function startRabbitMQConsumer() {
 
           if (res.rows.length > 0) {
             const opp = res.rows[0].match_details;
-            
-            // Mantendo o prefixo original
-            const prefix = "⭐ *IMÓVEL PRÓPRIO*";
-            const wppMessage = `${prefix}\n\n${format(opp)}`;
+            const isSelf = isSelfOpportunity(opp);
 
-            // Dispara o WhatsApp (No momento para o GROUP_ID)
-            await client.sendMessage(GROUP_ID, wppMessage);
-            console.log(`[EGRESS] Oportunidade ${oppId} despachada instantaneamente via RabbitMQ!`); 
+            // ================================================================
+            // NOTA / REFINAMENTO FUTURO: Filtro por Score Mínimo
+            // Mantido comentado na v2.0.0 para não descartar matches em fase de teste.
+            // const MIN_MATCH_SCORE_GROUP = 50;
+            // if (!isSelf && (opp.score || 0) < MIN_MATCH_SCORE_GROUP) {
+            //   console.log(`[EGRESS] Opp ${oppId} ignorada por score baixo: ${opp.score}`);
+            //   channel.ack(msg);
+            //   return;
+            // }
+            // ================================================================
 
-            // Atualiza o banco para SENT
+            let destination = "";
+            let logType = "";
+
+            if (isSelf) {
+              // Imóveis próprios: prioridade DM direta
+              destination = PRIORITY_CONTACT_ID || GROUP_ID;
+              logType = "IMÓVEL PRÓPRIO (DM)";
+            } else {
+              // Imóveis de parceiros: grupo de corretores com controle de taxa
+              await checkAndApplyGroupRateLimit();
+              destination = GROUP_ID;
+              logType = "PARCERIA/TERCEIRO (GRUPO)";
+            }
+
+            if (!destination) {
+              console.warn(
+                `⚠️ [EGRESS] Destinatário não configurado para ${logType}. Oportunidade ${oppId} não enviada.`
+              );
+              channel.ack(msg);
+              return;
+            }
+
+            const wppMessage = format(opp, isSelf);
+            await client.sendMessage(destination, wppMessage);
+
+            console.log(
+              `✅ [EGRESS] Oportunidade ${oppId} [${logType}] enviada com sucesso para ${destination}!`
+            );
+
+            // Atualiza status no banco
             await pool.query(
               "UPDATE opportunities SET dispatch_status = 'SENT' WHERE opportunity_id = $1",
               [oppId]
             );
           }
 
-          // Confirma o sucesso para o RabbitMQ deletar a mensagem da fila
+          // Confirmação para RabbitMQ
           channel.ack(msg);
-          
-          // Mantém a pausa de 2 segundos de segurança para o WhatsApp
-          await new Promise((resolve) => setTimeout(resolve, 2000));
 
+          // Pausa de 2 segundos de segurança para o WhatsApp
+          await new Promise((resolve) => setTimeout(resolve, 2000));
         } catch (error) {
-          console.error(`[EGRESS ERRO] Falha ao enviar oportunidade ${oppId}:`, error.message);
-          // O `nack` (negative acknowledgement) com requeue=true devolve a mensagem para a fila tentar de novo
-          channel.nack(msg, false, true); 
+          console.error(
+            `❌ [EGRESS ERRO] Falha ao enviar oportunidade ${oppId}:`,
+            error.message
+          );
+          channel.nack(msg, false, true);
         }
       }
     });
-
   } catch (error) {
     console.error("❌ [RABBITMQ] Erro no consumidor do Egress:", error);
   }
 }
 
-function format(o) {
-  // A estrutura 'o' agora reflete o retorno do Cypher salvo na coluna match_details
+function format(o, isSelf) {
   const buyer = o.buyer || {};
   const seller = o.seller || {};
 
-  let message = `🔥 *OPORTUNIDADE* | Score: ${o.score || 0}\n`;
+  const header = isSelf
+    ? "⭐ *OPORTUNIDADE — IMÓVEL PRÓPRIO*"
+    : "🔥 *OPORTUNIDADE DE PARCERIA*";
+
+  let message = `${header} | Score: ${o.score || 0}\n`;
   message += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n`;
 
   message += `👤 *COMPRADOR*\n`;
@@ -150,7 +276,11 @@ function format(o) {
 
   message += `\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n`;
 
-  message += `🏢 *VENDEDOR*\n`;
+  const sellerLabel = isSelf
+    ? "🏢 *VENDEDOR (INVENTÁRIO PRÓPRIO MAJESTO)*"
+    : "🏢 *VENDEDOR (PARCEIRO)*";
+
+  message += `${sellerLabel}\n`;
   message += `Nome: ${seller.name || "Não informado"}\n`;
   message += `Telefone: ${seller.phone || "Não informado"}\n`;
   message += `\nTexto original:\n_${seller.raw_text || "Sem texto"}_`;
