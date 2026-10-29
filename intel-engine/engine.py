@@ -9,7 +9,6 @@ from classifier import run_classifier
 from normalizer import run_normalizer
 from graphs.neo4j_client import GraphClient
 from runtime_config import rabbitmq_url
-from cleaner import run_cleaner
 
 from database import get_message_by_id, update_message_status, save_opportunities
 
@@ -96,6 +95,7 @@ def on_message(ch, method, properties, body):
 
 def _cleaner_loop(interval_hours: int = 6):
     """Executa a limpeza periódica do Neo4j e PostgreSQL em segundo plano."""
+    from cleaner import run_cleaner
     interval_seconds = interval_hours * 3600
     while True:
         try:
