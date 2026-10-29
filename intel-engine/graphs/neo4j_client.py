@@ -70,6 +70,29 @@ def _resolve_offer_id(original: dict, message_id: str) -> str:
     return _require_identity(original.get("offer_id", message_id), "Oferta.offer_id")
 
 
+def _normalize_neighborhood(value: str) -> str:
+    """Normalize neighborhood name to UPPER CASE for consistent graph matching.
+
+    All Bairro nodes must share the same case convention so that
+    MERGE and MATCH statements unify nodes regardless of whether the
+    name originates from the NLP normalizer (already upper-case) or
+    from the PostgreSQL inventory (title-case from bairros.nome).
+    """
+    return value.strip().upper()
+
+
+def _normalize_property_type(value) -> str | None:
+    """Normalize property type to UPPER CASE for consistent graph matching.
+
+    Demanda nodes receive property_type in UPPER CASE from the NLP
+    normalizer, while Imovel nodes from the inventory receive it in
+    title-case (e.g. 'Apartamento'). Normalizing both to UPPER CASE
+    ensures the score_type comparison in match_opportunities works correctly.
+    """
+    if value is None:
+        return None
+    return str(value).strip().upper()
+
 
 def _sanitize_numeric(value):
     if value is None:
@@ -122,13 +145,19 @@ class GraphClient:
         property_id = _resolve_property_id(ad_data, original, message_id) if not buying else None
         demand_id = _resolve_demand_id(original, message_id) if buying else None
         offer_id = _resolve_offer_id(original, message_id) if not buying else None
-        
+
+        # Normaliza bairros para UPPER CASE para garantir unificação dos nós Bairro
+        # independente da origem (NLP normalizer vs inventário PostgreSQL).
         bairros = [
-            str(bairro).strip()
+            _normalize_neighborhood(str(bairro))
             for bairro in (ad_data.get("neighborhood") or [])
             if bairro and str(bairro).strip().lower() != "desconhecido"
         ]
-        bairro_principal = bairros[0] if bairros else "Desconhecido"
+        bairro_principal = bairros[0] if bairros else "DESCONHECIDO"
+
+        # Normaliza tipologia para UPPER CASE para garantir compatibilidade
+        # entre Demanda (vinda do NLP) e Imovel (vindo do inventário).
+        tipo_normalizado = _normalize_property_type(ad_data.get("property_type"))
 
         query = """
         // Pessoa e Mensagem
@@ -203,7 +232,7 @@ class GraphClient:
                 property_id=property_id,
                 texto=ad_data.get("raw_text", ""),
                 ts=original.get("timestamp", 0),
-                tipo=ad_data.get("property_type"),
+                tipo=tipo_normalizado,
                 preco=_sanitize_numeric(ad_data.get("price")),
                 quartos=ad_data.get("bedrooms"),
                 area=_sanitize_numeric(ad_data.get("area_m2")),
@@ -226,7 +255,7 @@ class GraphClient:
 
     def deactivate_inventory_property(self, property_id):
         """Deactivate an inventory offer without deleting its property node."""
-        property_id = _require_identity(property_id, "ImovelID do inventÃ¡rio")
+        property_id = _require_identity(property_id, "ImovelID do inventário")
         query = """
         MATCH (i:Imovel {id: $property_id})
         OPTIONAL MATCH (o:Oferta {offer_id: $offer_id})-[:REFERE_SE_A]->(i)

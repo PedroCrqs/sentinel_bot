@@ -38,6 +38,12 @@ Based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **Heavy Prioritization of Majesto Inventory**: Own properties from `public.imoveis` receive a +35 priority score bonus and route exclusively to priority private DM (`PRIORITY_CONTACT_ID`) with **no hourly rate limit**.
 - **Sanitized Numeric Types**: Converted PostgreSQL `decimal.Decimal` to `float` across adapters to prevent Bolt serialization exceptions.
 
+#### Fixed
+
+- **Case-Insensitive Neighborhood Normalization in `graphs/neo4j_client.py`** (`_normalize_neighborhood()`): The NLP normalizer (spaCy) produces neighborhood names in UPPER CASE (e.g. `"COPACABANA"`), while the PostgreSQL inventory (`bairros.nome`) stores them in title-case (e.g. `"Copacabana"`). Because Neo4j `MERGE` on `Bairro {nome: ...}` is case-sensitive, two distinct nodes were created for the same neighborhood, making the `MATCH (d:Demanda)-[:BUSCA_EM]->(b:Bairro)<-[:LOCALIZADO_EM]-(i:Imovel)` join always miss inventory properties. Fix: all neighborhood values are now normalized to UPPER CASE via `_normalize_neighborhood()` before being sent to Neo4j, unifying the two populations into a single `Bairro` node per neighborhood. **This was the root cause of zero Majesto inventory matches.**
+- **Case-Insensitive Property Type Normalization in `graphs/neo4j_client.py`** (`_normalize_property_type()`): For the same reason, `property_type` from the inventory (e.g. `"Apartamento"`) did not match `property_type` from buyer demands (e.g. `"APARTAMENTO"`), causing the `score_type` Cypher `CASE` to always return 0 for inventory properties. Fix: `property_type` is now normalized to UPPER CASE via `_normalize_property_type()` on both `Demanda` and `Imovel` nodes at ingestion time.
+- **Neo4j Data Migration**: Existing `Bairro` nodes and `Imovel.property_type` values stored with inconsistent casing were retroactively corrected via a one-time Cypher migration script, merging duplicate neighborhood nodes and re-pointing all dangling `BUSCA_EM` / `LOCALIZADO_EM` relationships to the unified UPPER CASE nodes.
+
 ---
 
 ### Português
@@ -70,6 +76,12 @@ Based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **Qualificação Estrita de Oportunidades no Engine**: Oportunidades de parceiros passam por validação de score mínimo (`score > 50`) diretamente no `intel-engine/engine.py`. Oportunidades com pontuação insuficiente são descartadas e logadas no Engine, mantendo o `wpp-egress` desacoplado e focado exclusivamente no disparo para o WhatsApp.
 - **Super Prioridade para Inventário Majesto**: Imóveis próprios recebem +35 pontos de bônus no cálculo de score e são despachados diretamente na DM privada prioritária (`PRIORITY_CONTACT_ID`) **sem limite de envios por hora**. Matches de inventário ocorrem exclusivamente quando o imóvel está com status `DISPONIVEL` na tabela `public.imoveis`.
 - **Sanitização de Tipos Numéricos**: Conversão de `decimal.Decimal` do PostgreSQL para `float` em todos os adaptadores para compatibilidade com o protocolo Bolt.
+
+#### Corrigido
+
+- **Normalização de Bairros para UPPER CASE em `graphs/neo4j_client.py`** (`_normalize_neighborhood()`): O normalizador NLP (spaCy) produz nomes de bairros em MAIÚSCULAS (ex: `"COPACABANA"`), enquanto o inventário PostgreSQL (`bairros.nome`) armazena em title-case (ex: `"Copacabana"`). Como o `MERGE` do Neo4j em `Bairro {nome: ...}` é sensível a maiúsculas/minúsculas, dois nós distintos eram criados para o mesmo bairro, fazendo o `MATCH (d:Demanda)-[:BUSCA_EM]->(b:Bairro)<-[:LOCALIZADO_EM]-(i:Imovel)` nunca encontrar imóveis do inventário. Correção: todos os valores de bairro são agora normalizados para MAIÚSCULAS via `_normalize_neighborhood()` antes de serem enviados ao Neo4j, unificando as duas populações em um único nó `Bairro` por bairro. **Esta era a causa raiz de zero matches do inventário Majesto.**
+- **Normalização de Tipologia para UPPER CASE em `graphs/neo4j_client.py`** (`_normalize_property_type()`): Pelo mesmo motivo, o `property_type` do inventário (ex: `"Apartamento"`) não era igual ao das demandas (ex: `"APARTAMENTO"`), fazendo o `CASE` de `score_type` no Cypher retornar sempre 0 para imóveis do inventário. Correção: `property_type` é agora normalizado para MAIÚSCULAS via `_normalize_property_type()` em nós `Demanda` e `Imovel` no momento da ingestão.
+- **Migração de Dados do Neo4j**: Os nós `Bairro` e os valores de `Imovel.property_type` já armazenados com inconsistência de caixa foram corrigidos retroativamente via script Cypher de migração pontual, fundindo nós de bairro duplicados e re-apontando todos os relacionamentos `BUSCA_EM` / `LOCALIZADO_EM` para os nós unificados em MAIÚSCULAS.
 
 ---
 

@@ -179,6 +179,35 @@ conn.close()
 "
 ```
 
+### 4b. Migração Neo4j: Normalização de Bairros e Tipologia (one-time)
+
+> [!IMPORTANT]
+> Execute **uma única vez** em ambientes que já possuíam dados no Neo4j antes do fix de normalização de case (v2.0.0). Este passo funde nós `Bairro` duplicados (title-case vs UPPER CASE) e corrige `Imovel.property_type` para garantir matching correto com o inventário Majesto.
+
+```bash
+cd intel-engine
+source .venv/bin/activate
+python -c "
+from graphs.neo4j_client import GraphClient
+g = GraphClient()
+with g.driver.session() as s:
+    # Renomear bairros sem duplicata UPPER
+    s.run('MATCH (b:Bairro) WHERE b.nome <> toUpper(b.nome) AND NOT EXISTS { MATCH (b2:Bairro {nome: toUpper(b.nome)}) } SET b.nome = toUpper(b.nome)')
+    # Re-apontar BUSCA_EM
+    s.run('MATCH (b_old:Bairro) WHERE b_old.nome <> toUpper(b_old.nome) MATCH (b_new:Bairro {nome: toUpper(b_old.nome)}) WITH b_old, b_new MATCH (d:Demanda)-[rel:BUSCA_EM]->(b_old) MERGE (d)-[:BUSCA_EM]->(b_new) DELETE rel')
+    # Re-apontar LOCALIZADO_EM
+    s.run('MATCH (b_old:Bairro) WHERE b_old.nome <> toUpper(b_old.nome) MATCH (b_new:Bairro {nome: toUpper(b_old.nome)}) WITH b_old, b_new MATCH (i:Imovel)-[rel:LOCALIZADO_EM]->(b_old) MERGE (i)-[:LOCALIZADO_EM]->(b_new) DELETE rel')
+    # Deletar nós isolados
+    s.run('MATCH (b:Bairro) WHERE b.nome <> toUpper(b.nome) AND NOT EXISTS { ()-[:BUSCA_EM]->(b) } AND NOT EXISTS { ()-[:LOCALIZADO_EM]->(b) } DELETE b')
+    # Corrigir property_type
+    s.run('MATCH (i:Imovel) WHERE i.property_type IS NOT NULL AND i.property_type <> toUpper(i.property_type) SET i.property_type = toUpper(i.property_type), i.tipo = toUpper(i.tipo)')
+g.close()
+print('Migração concluída.')
+"
+# Após a migração, re-sincronizar o inventário completo
+python inventory_sync.py full-rebuild
+```
+
 ### 5. Iniciar com PM2
 
 ```bash
