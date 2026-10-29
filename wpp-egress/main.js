@@ -88,19 +88,21 @@ client.on("auth_failure", (msg) => {
 });
 
 // ============================================================================
-// Identificador de Imóvel Próprio vs Imóvel de Terceiro
+// Identificador estrito de Imóvel Próprio vs Imóvel de Terceiro
+//
+// Imóveis próprios vêm da tabela Imoveis (public.imoveis) e recebem:
+//   - offer_id iniciado com "self-offer:"
+//   - seller.name contendo "Majesto"
+// Anúncios de terceiros coletados do WhatsApp NÃO possuem esse prefixo.
 // ============================================================================
 function isSelfOpportunity(opp) {
   if (opp.offer_id && String(opp.offer_id).startsWith("self-offer:")) {
     return true;
   }
-  if (opp.matched_imovel_id !== null && opp.matched_imovel_id !== undefined) {
-    return true;
-  }
   if (
     opp.seller &&
     opp.seller.name &&
-    String(opp.seller.name).includes("Majesto")
+    String(opp.seller.name).toLowerCase().includes("majesto")
   ) {
     return true;
   }
@@ -108,7 +110,7 @@ function isSelfOpportunity(opp) {
 }
 
 // ============================================================================
-// Controle de Fluxo por Hora para o Grupo
+// Controle de Fluxo por Hora para o Grupo (Parcerias)
 // ============================================================================
 async function checkAndApplyGroupRateLimit() {
   const ONE_HOUR_MS = 60 * 60 * 1000;
@@ -182,11 +184,11 @@ async function startRabbitMQConsumer() {
             let logType = "";
 
             if (isSelf) {
-              // Imóveis próprios: prioridade DM direta
+              // Imóveis próprios: vão direto para a DM prioritária
               destination = PRIORITY_CONTACT_ID || GROUP_ID;
               logType = "IMÓVEL PRÓPRIO (DM)";
             } else {
-              // Imóveis de parceiros: grupo de corretores com controle de taxa
+              // Imóveis de parceiros (terceiros): vão para o grupo com limitador de taxa
               await checkAndApplyGroupRateLimit();
               destination = GROUP_ID;
               logType = "PARCERIA/TERCEIRO (GRUPO)";
