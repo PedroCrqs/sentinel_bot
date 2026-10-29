@@ -1,3 +1,4 @@
+from decimal import Decimal
 import unittest
 import sys
 from pathlib import Path
@@ -26,6 +27,16 @@ def inventory_row(**overrides):
 
 
 class InventoryAdapterTests(unittest.TestCase):
+    
+    def test_converts_decimal_price_and_area(self):
+        mapped = map_inventory_row(
+            inventory_row(valor=Decimal("1250000.50"), metragem=Decimal("85.75"))
+        )
+        self.assertEqual(mapped["price"], 1250000.50)
+        self.assertIsInstance(mapped["price"], float)
+        self.assertEqual(mapped["area"], 85.75)
+        self.assertIsInstance(mapped["area"], float)
+
     def test_maps_complete_external_row(self):
         mapped = map_inventory_row(inventory_row())
 

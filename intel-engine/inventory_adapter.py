@@ -1,3 +1,4 @@
+from decimal import Decimal
 """Adapter for the external/shared public.imoveis inventory contract.
 
 The Sentinel consumes this schema and does not own or alter its tables. Rows
@@ -42,6 +43,14 @@ def _normalize_status(value):
     raise InventoryAdapterError(f"Unknown inventory status: {value!r}")
 
 
+
+def _to_numeric(value):
+    if value is None:
+        return None
+    if isinstance(value, Decimal):
+        return float(value)
+    return value
+
 def map_inventory_row(row: dict) -> dict:
     """Map one physical ``public.imoveis`` row to the Sentinel contract."""
     property_id = _required(row.get("imovelid"), "imovelid")
@@ -53,8 +62,8 @@ def map_inventory_row(row: dict) -> dict:
         "property_type": _required(row.get("tipologia"), "tipologia"),
         "bedrooms": row.get("quartos"),
         "parking_spots": row.get("vagas"),
-        "price": row.get("valor"),
-        "area": row.get("metragem"),
+        "price": _to_numeric(row.get("valor")),
+        "area": _to_numeric(row.get("metragem")),
         "sun_type": row.get("sol"),
         "neighborhood": neighborhood,
         "status": _normalize_status(row.get("imovelstatus")),

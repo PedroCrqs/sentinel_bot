@@ -70,6 +70,15 @@ def _resolve_offer_id(original: dict, message_id: str) -> str:
     return _require_identity(original.get("offer_id", message_id), "Oferta.offer_id")
 
 
+
+def _sanitize_numeric(value):
+    if value is None:
+        return None
+    from decimal import Decimal
+    if isinstance(value, Decimal):
+        return float(value)
+    return value
+
 def _inventory_offer_status(ad_data: dict) -> str:
     status = ad_data.get("status")
     if status == "available":
@@ -195,9 +204,9 @@ class GraphClient:
                 texto=ad_data.get("raw_text", ""),
                 ts=original.get("timestamp", 0),
                 tipo=ad_data.get("property_type"),
-                preco=ad_data.get("price"),
+                preco=_sanitize_numeric(ad_data.get("price")),
                 quartos=ad_data.get("bedrooms"),
-                area=ad_data.get("area_m2"),
+                area=_sanitize_numeric(ad_data.get("area_m2")),
                 vagas=ad_data.get("parking_spots"),
                 frente_mar=ad_data.get("seafront", False),
                 condominio=ad_data.get("condominium", False),

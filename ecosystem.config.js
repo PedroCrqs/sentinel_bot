@@ -37,7 +37,7 @@ module.exports = {
     {
       name: "sentinel-engine", // engine: consome raw_messages, faz NLP, Neo4j, e despacha no RabbitMQ
       script: "engine.py",
-      interpreter: path.join(__dirname, ".venv", ...pythonPath), // monta o caminho dinamicamente dependendo do sistema operacional
+      interpreter: path.join(__dirname, "intel-engine", ".venv", ...pythonPath), // monta o caminho dinamicamente dependendo do sistema operacional
       cwd: path.join(__dirname, "intel-engine"),
       env: {
         NODE_ENV: "production"
@@ -50,7 +50,7 @@ module.exports = {
     {
       name: "sentinel-inventory-sync", // snapshot/diff independente do processamento de mensagens
       script: "inventory_sync_worker.py",
-      interpreter: path.join(__dirname, ".venv", ...pythonPath),
+      interpreter: path.join(__dirname, "intel-engine", ".venv", ...pythonPath),
       cwd: path.join(__dirname, "intel-engine"),
       autorestart: true,
       max_restarts: 15,
