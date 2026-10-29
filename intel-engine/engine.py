@@ -16,6 +16,16 @@ from database import get_message_by_id, update_message_status, save_opportunitie
 RABBITMQ_URL = rabbitmq_url()
 LOGGER = logging.getLogger(__name__)
 
+# Score mínimo para envio de oportunidades de parceiros
+MIN_MATCH_SCORE = 50
+
+
+def _is_self_opportunity(opp: dict) -> bool:
+    """Identifica se a oportunidade envolve imóvel próprio do inventário Majesto."""
+    offer_id = str(opp.get("offer_id") or "")
+    seller_name = str((opp.get("seller") or {}).get("name") or "").lower()
+    return offer_id.startswith("self-offer:") or "majesto" in seller_name
+
 
 def process_message(message_id, publish_opportunity):
     """Process one message without making delivery-level ACK/NACK decisions."""
@@ -39,9 +49,27 @@ def process_message(message_id, publish_opportunity):
     finally:
         graph.close()
 
+    # Qualificação de oportunidades no Engine:
+    # - Imóveis próprios Majesto têm prioridade máxima e passam direto.
+    # - Oportunidades de parceiros exigem score > 50; scores <= 50 são descartadas e logadas aqui no Engine.
+    qualified_opportunities = []
+    for opp in opportunities:
+        score = opp.get("score") or 0
+        is_self = _is_self_opportunity(opp)
+        if not is_self and score <= MIN_MATCH_SCORE:
+            LOGGER.info(
+                "oportunidade de parceiro descartada por score insuficiente (score=%s <= %s): demand=%s offer=%s",
+                score,
+                MIN_MATCH_SCORE,
+                opp.get("demand_id"),
+                opp.get("offer_id"),
+            )
+            continue
+        qualified_opportunities.append(opp)
+
     published_count = 0
-    if opportunities:
-        opp_ids = save_opportunities(opportunities)
+    if qualified_opportunities:
+        opp_ids = save_opportunities(qualified_opportunities)
         for opp_id in opp_ids:
             publish_opportunity(opp_id)
             published_count += 1
@@ -53,9 +81,10 @@ def process_message(message_id, publish_opportunity):
     norm_data = pad_data_map.get(message_id)
     update_message_status(message_id, "PROCESSED", normalized_data=norm_data)
     LOGGER.info(
-        "message processed successfully message_id=%s opportunities=%s",
+        "message processed successfully message_id=%s opportunities=%s (qualificadas=%s)",
         message_id,
         len(opportunities),
+        published_count,
     )
     return {"already_processed": False, "opportunities": published_count}
 

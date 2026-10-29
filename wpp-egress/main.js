@@ -24,9 +24,6 @@ const SESSION_PATH = path.join(__dirname, "session");
 const GROUP_ID = process.env.GROUP_ID || "";
 const PRIORITY_CONTACT_ID = process.env.PRIORITY_CONTACT_ID || "";
 
-// Score mínimo para despacho de oportunidades de parceiros
-const MIN_MATCH_SCORE = parseInt(process.env.MIN_MATCH_SCORE || "50", 10);
-
 // Rate Limit para oportunidades de terceiros enviadas ao grupo
 // Padrão: no máximo 10 mensagens por hora para não poluir o grupo
 const MAX_GROUP_OPPS_PER_HOUR = parseInt(
@@ -171,20 +168,6 @@ async function startRabbitMQConsumer() {
           if (res.rows.length > 0) {
             const opp = res.rows[0].match_details;
             const isSelf = isSelfOpportunity(opp);
-
-            // ================================================================
-            // Regra de Negócio: Egress só envia oportunidades com score > 50.
-            // Imóveis próprios Majesto recebem super prioridade no engine e são enviados
-            // sem qualquer limite de taxa por hora diretamente para a DM prioritária.
-            // ================================================================
-            const score = Number(opp.score || 0);
-            if (!isSelf && score <= MIN_MATCH_SCORE) {
-              console.log(
-                `⏭️ [EGRESS] Opp de parceiro ${oppId} descartada por score insuficiente: ${score} (mínimo exigido: > ${MIN_MATCH_SCORE})`
-              );
-              channel.ack(msg);
-              return;
-            }
 
             let destination = "";
             let logType = "";

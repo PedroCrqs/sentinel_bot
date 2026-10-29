@@ -34,7 +34,7 @@ Based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 #### Changed
 
 - **Mandatory Price Compatibility in Matcher**: Location alone no longer qualifies an opportunity. Both demand and offer must specify a price, and offer price must be less than or equal to buyer budget (`o.price <= d.price`).
-- **Strict Egress Score Filtering**: Third-party partner opportunities are filtered at egress to dispatch only opportunities with score strictly greater than 50 (`score > 50`), discarding low-confidence matches.
+- **Strict Opportunity Qualification in Engine**: Partner opportunities are evaluated and filtered directly in `intel-engine/engine.py` (only matches with score strictly greater than 50, `score > 50`, are saved and published to RabbitMQ). Discarded opportunities are logged within the engine, maintaining `wpp-egress` purely focused on WhatsApp dispatch.
 - **Heavy Prioritization of Majesto Inventory**: Own properties from `public.imoveis` receive a +35 priority score bonus and route exclusively to priority private DM (`PRIORITY_CONTACT_ID`) with **no hourly rate limit**.
 - **Sanitized Numeric Types**: Converted PostgreSQL `decimal.Decimal` to `float` across adapters to prevent Bolt serialization exceptions.
 
@@ -67,8 +67,8 @@ Based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 #### Alterado
 
 - **Compatibilidade Obrigatória de Preço no Matcher**: Apenas o bairro compartilhado não gera mais oportunidades. É obrigatório que ambos os lados possuam preço e que a oferta caiba no orçamento do comprador (`o.price <= d.price`).
-- **Filtro Estrito por Score no Egress**: Oportunidades de parceiros passam por validação de score mínimo (`score > 50`) antes do envio, descartando matches com baixa precisão.
-- **Super Prioridade para Inventário Majesto**: Imóveis próprios recebem +35 pontos de bônus no cálculo de score e são despachados diretamente na DM privada prioritária (`PRIORITY_CONTACT_ID`) **sem limite de envios por hora**.
+- **Qualificação Estrita de Oportunidades no Engine**: Oportunidades de parceiros passam por validação de score mínimo (`score > 50`) diretamente no `intel-engine/engine.py`. Oportunidades com pontuação insuficiente são descartadas e logadas no Engine, mantendo o `wpp-egress` desacoplado e focado exclusivamente no disparo para o WhatsApp.
+- **Super Prioridade para Inventário Majesto**: Imóveis próprios recebem +35 pontos de bônus no cálculo de score e são despachados diretamente na DM privada prioritária (`PRIORITY_CONTACT_ID`) **sem limite de envios por hora**. Matches de inventário ocorrem exclusivamente quando o imóvel está com status `DISPONIVEL` na tabela `public.imoveis`.
 - **Sanitização de Tipos Numéricos**: Conversão de `decimal.Decimal` do PostgreSQL para `float` em todos os adaptadores para compatibilidade com o protocolo Bolt.
 
 ---
