@@ -1,224 +1,182 @@
 # 🤖 Sentinel Bot
 
-> Bot de monitoramento e detecção inteligente de oportunidades imobiliárias via WhatsApp, com matching semântico, normalização e classificação automática.
+> Bot de inteligência imobiliária com arquitetura orientada a eventos (EDA) via **RabbitMQ**, persistência relacional em **PostgreSQL**, grafo de conhecimento em **Neo4j** e processamento de linguagem natural (NLP) via **spaCy**. Monitora grupos de WhatsApp, extrai intenções imobiliárias, projeta entidades em grafo e gera conexões semânticas em tempo real.
 
 ---
 
-## ✨ Funcionalidades
+## 🏗️ Arquitetura do Sistema
 
-- Coleta de mensagens do WhatsApp em tempo real, com deduplicação e blocklist na origem (`wpp-collector`)
-- Classificação automática de mensagens (venda, compra, inútil)
-- Normalização e extração de atributos (bairro, preço, quartos, condomínio, etc.) via spaCy
-- Matching semântico entre compradores e vendedores (`intel-engine`)
-- **Priorização de imóveis próprios**: imóveis cadastrados no seu banco (`database.py`) são cruzados com compradores e notificados por **DM direta**, separado do fluxo normal
-- Disparo de notificações via WhatsApp, isolado em seu próprio processo (`wpp-egress`)
-- Limpeza automática de dados (deduplicação, expiração por idade) integrada ao ciclo do engine
-- Purge de usuário bloqueado (`purge_user.py`)
-- Deploy 24/7 via `pm2`, três processos independentes
-
-> ⚠️ **Status atual (v1.7.0):** o dispatch de oportunidades **regulares** (comprador × vendedor externo) está em *standby* para fins de teste. Só as oportunidades envolvendo imóveis próprios notificam no momento. Ver [CHANGELOG](CHANGELOG.md).
-
----
-
-## 🏗️ Arquitetura
-
-O projeto é dividido em **três módulos independentes**, cada um seu próprio processo, cada um sua própria pasta com `package.json`/dependências próprias:
+O Sentinel Bot é composto por **4 serviços desacoplados**, orquestrados pelo **PM2** e comunicando-se via mensageria assíncrona:
 
 ```
-wpp-collector  →  data/messages.jsonl  →  intel-engine  →  data/*_opportunities.jsonl  →  wpp-egress
-   (Node)                                    (Python)                                        (Node)
+[ WhatsApp ]
+     │
+     ▼
+┌──────────────────┐
+│  wpp-collector   │ ──(1. INSERT raw_messages)──> [ PostgreSQL ]
+│     (Node.js)    │ ──(2. publish message_id)───> [ RabbitMQ (raw_messages) ]
+└──────────────────┘                                      │
+                                                          ▼
+┌──────────────────┐                              ┌──────────────────┐
+│  sentinel-engine │ <─────────────────────────── │  intel-engine    │
+│     (Python)     │ ──(NLP: spaCy pt_core_lg)    │     (Python)     │
+│                  │ ──(Projeta Demanda/Oferta)─> [ Neo4j Graph DB ] │
+│                  │ ──(Match Cypher)───────────>         │          │
+│                  │ ──(INSERT opportunities)───> [ PostgreSQL ]     │
+│                  │ ──(publish opportunity_id)─> [ RabbitMQ (opps) ]│
+└──────────────────┘                                      │
+                                                          ▼
+┌──────────────────┐                              ┌──────────────────┐
+│    wpp-egress    │ <─────────────────────────── │  opportunities   │
+│     (Node.js)    │ ──(Disparo WhatsApp DM/Grupo)                         │
+└──────────────────┘
 ```
 
-- **`wpp-collector`** — conecta no WhatsApp, escuta um grupo, grava cada mensagem nova em `data/messages.jsonl`. Só ingest: não sabe nada sobre matching ou notificações.
-- **`intel-engine`** — lê `data/messages.jsonl`, classifica, normaliza, faz o matching (comprador × vendedor e comprador × imóvel próprio), exporta as oportunidades e roda a limpeza periódica dos dados.
-- **`wpp-egress`** — conecta no WhatsApp (sessão própria, pode ser um número diferente do `wpp-collector`), lê os arquivos de oportunidades e envia as notificações — pro grupo ou por DM.
-
-Por serem pastas/pacotes Node separados, cada módulo já tem sua própria sessão de autenticação (`session/` dentro da respectiva pasta) — não há risco de um processo derrubar a sessão do outro, mesmo usando números de WhatsApp diferentes.
+### Serviço Adicional: Worker de Sincronização de Inventário
+- **`sentinel-inventory-sync`** (`inventory_sync_worker.py`): Worker independente que monitora o inventário de imóveis próprios (`public.imoveis`) no PostgreSQL, calcula fingerprints por hash SHA-256 e sincroniza snapshots/diffs diretamente no Neo4j com suporte a status ativos/inativos sem apagar histórico.
 
 ---
 
-## 🛠️ Requisitos
+## 🗄️ Infraestrutura e Bancos de Dados
 
-- Python 3.13 com [spaCy](https://spacy.io/) e o modelo `pt_core_news_lg`
-- Node.js 18+ (para `whatsapp-web.js`, em `wpp-collector` e `wpp-egress`)
-- [pm2](https://pm2.keymetrics.io/) instalado globalmente (`npm install -g pm2`)
-- Um banco SQLite de imóveis próprios acessível pelo `intel-engine/database.py` (ver seção [Banco de imóveis próprios](#-banco-de-imóveis-próprios-databasepy))
+### 1. PostgreSQL (Docker `postgres:16-alpine`)
+- **`raw_messages`**: Fila de mensagens recebidas (`message_id`, `author_id`, `author_name`, `message`, `ad_hash`, `timestamp`, `status`, `normalized_data`).
+- **`opportunities`**: Oportunidades geradas pelo matcher (`opportunity_id`, `buyer_message_id`, `seller_message_id`, `matched_imovel_id`, `match_score`, `match_details`, `dispatch_status`, `rule_version`).
+- **`inventory_sync_state`**: Tabela de controle de versão dos imóveis sincronizados (`property_id`, `fingerprint`, `source_status`, `is_present`, `last_synced_at`).
+- **`imoveis`**: Tabela do sistema imobiliário com inventário próprio da Majesto.
 
-> ⚠️ **Importante:** o `ecosystem.config.js` aponta o `sentinel-engine` direto para `intel-engine/venv/bin/python`. O pm2 roda como daemon e resolve `"python3"` pelo próprio `PATH`, não pelo do seu shell — então a venv **precisa** estar nesse caminho exato (`intel-engine/venv`), ou o `sentinel-engine` sobe usando o Python errado (sem spaCy instalado) e fica em crash-loop.
+### 2. RabbitMQ (Docker `rabbitmq:3-management`)
+- Porta `5672` (AMQP) e `15672` (Management Dashboard).
+- Fila `raw_messages`: Notificação instantânea para o engine a cada nova mensagem ingerida.
+- Fila `opportunities_queue`: Notificação instantânea para o egress a cada oportunidade qualificada.
+- QOS configurado (`prefetch_count=1`) para controle estrito de fluxo e concorrência justa.
+
+### 3. Neo4j Graph Database (Docker `neo4j:5.26.0-community`)
+- Portas `7687` (Bolt) e `7474` (HTTP Browser).
+- Arquitetura de Grafo:
+  ```
+  (Pessoa)-[:CRIOU]->(Demanda)-[:BUSCA_EM]->(Bairro)
+  (Pessoa)-[:PUBLICOU]->(Oferta)-[:REFERE_SE_A]->(Imovel)-[:LOCALIZADO_EM]->(Bairro)
+  (Mensagem)-[:EXPRESSA]->(Demanda)
+  (Mensagem)-[:ORIGINA]->(Oferta)
+  ```
+- Constraints de unicidade aplicadas em `Pessoa.person_id`, `Mensagem.id`, `Demanda.demand_id`, `Oferta.offer_id`, `Imovel.id`.
 
 ---
 
-## 📦 Instalação
+## ⚙️ Variáveis de Ambiente (`.env`)
+
+Crie o arquivo `.env` na raiz do projeto com base no `.env.example`:
+
+```env
+# PostgreSQL
+DATABASE_URL=postgresql://imoveis_app:SUA_SENHA@localhost:5432/imoveis
+POSTGRES_USER=imoveis_app
+POSTGRES_PASSWORD=SUA_SENHA
+POSTGRES_DB=imoveis
+
+# RabbitMQ
+RABBITMQ_URL=amqp://localhost:5672
+
+# Neo4j Local (Docker)
+NEO4J_URI=bolt://localhost:7687
+NEO4J_USERNAME=neo4j
+NEO4J_PASSWORD=SUA_SENHA_NEO4J
+
+# Filtros WhatsApp
+BLOCKED_IDS=id1@lid,id2@lid
+
+# Destinatários WhatsApp (Egress)
+GROUP_ID=120363424642701935@g.us
+PRIORITY_CONTACT_ID=96654279573661@lid
+```
+
+---
+
+## 🚀 Instalação e Execução
+
+### 1. Subir Infraestrutura Docker
 
 ```bash
-# Clone o repositório
-git clone https://github.com/PedroCrqs/sentinel_bot.git
-cd sentinel_bot
+# Subir o Neo4j local persistente
+docker compose -f docker-compose.neo4j.yml up -d
 
-# intel-engine (Python)
+# Aplicar constraints iniciais no Neo4j
+docker cp infra/neo4j/constraints.cypher sentinel-neo4j:/tmp/constraints.cypher
+docker exec sentinel-neo4j cypher-shell -u neo4j -p "$NEO4J_PASSWORD" -f /tmp/constraints.cypher
+```
+
+### 2. Configurar o Python (`intel-engine`)
+
+```bash
 cd intel-engine
-python3 -m venv venv
-source venv/bin/activate
+python -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
-python -m spacy download pt_core_news_lg
-deactivate
-cd ..
-
-# wpp-collector (Node) — dependências próprias
-cd wpp-collector
-npm install
-cd ..
-
-# wpp-egress (Node) — dependências próprias
-cd wpp-egress
-npm install
-cd ..
-
-# pm2 (se ainda não tiver)
-npm install -g pm2
 ```
 
----
-
-## ▶️ Como usar
-
-Os três processos são gerenciados via `pm2`, a partir do `ecosystem.config.js` na raiz do projeto:
+### 3. Configurar os Módulos Node.js
 
 ```bash
-pm2 start ecosystem.config.js
-pm2 logs          # acompanhar os três processos
-pm2 status         # ver se estão rodando
+cd ../wpp-collector && npm install
+cd ../wpp-egress && npm install
 ```
 
-Na primeira execução do `sentinel-collector` e do `sentinel-egress`, escaneie o QR Code exibido no terminal (`pm2 logs sentinel-collector` / `pm2 logs sentinel-egress`) pra autenticar cada sessão do WhatsApp Web. Se usar números diferentes para coletar e para notificar, escaneie com o celular correspondente a cada um.
-
-Veja [Deploy 24/7 com pm2](#-deploy-247-com-pm2) para deixar isso rodando permanentemente na máquina.
-
----
-
-## 🏠 Banco de imóveis próprios (`database.py`)
-
-Imóveis com `ImovelStatus = 'Disponível'` são lidos de um banco SQLite externo e cruzados contra os compradores identificados no WhatsApp. Quando há match, você recebe uma **DM direta** (não vai pro grupo) — essa é a via prioritária.
-
-Pontos importantes:
-
-- `intel-engine/database.py` espera o banco em `../../imoveis-database/data/imoveis.db` (fora da pasta `sentinel_bot/`, como projeto irmão). Ajuste `DB_PATH` em `database.py` se sua estrutura for diferente.
-- Cada imóvel vira um `message_id` estável (`self-<hash da descrição>`), calculado a partir do texto da coluna `Descricao`. Se a descrição do imóvel mudar, ele é tratado como um "novo anúncio" — isso é intencional.
-- As oportunidades geradas por esse cruzamento vão para `data/self_opportunities.jsonl`, separado de `data/opportunities.jsonl` (oportunidades entre terceiros). Isso mantém os dois fluxos independentes: dedup, expiração (15 dias) e dispatch cada um com seu próprio estado.
-- No `wpp-egress/main.js`, o destino da DM é fixado em `PRIORITY_CONTACT_ID`. Atualize esse valor com o seu ID de contato no formato usado pelo `whatsapp-web.js` (`@c.us` ou `@lid`, dependendo do seu número).
-
----
-
-## 🚫 Bloqueio de usuários — duas camadas diferentes
-
-O projeto tem dois mecanismos de bloqueio, com propósitos distintos — não confundir um com o outro:
-
-| Mecanismo | Onde | Quando age | Efeito |
-|---|---|---|---|
-| `BLOCKED_IDS` | `wpp-collector/main.js` | No momento da captura | Mensagens do usuário nunca chegam a ser gravadas em `messages.jsonl` |
-| `BLOCKED_ID` + `purge_user.py` | `intel-engine/purge_user.py` | Sob demanda, manual (`python purge_user.py`) | Remove retroativamente tudo que já foi gravado (mensagens e oportunidades) de um usuário específico |
-
-Se quer impedir a captura de um usuário dali pra frente, adicione o ID em `BLOCKED_IDS` (`wpp-collector/main.js`) e reinicie o `sentinel-collector`. Se quer apagar o que já foi coletado dele, rode `purge_user.py` com o ID em `BLOCKED_ID`.
-
----
-
-## 🧹 Limpeza automática (`cleaner.py`)
-
-Antes só rodava manualmente (`python cleaner.py`). Agora o `intel-engine/engine.py` chama as rotinas de limpeza sozinho, a cada **1 hora** (`CLEANUP_INTERVAL_SECONDS`, dentro de `engine.py`):
-
-- `clean_and_dedup_messages()` — remove mensagens expiradas (3 meses) e compradores antigos (30 dias), dedup por `message_id`/`ad_hash`
-- `clean_and_dedup_opportunities()` — remove oportunidades regulares expiradas (15 dias) e duplicadas
-- `clean_and_dedup_self_opportunities()` — mesma coisa, para `self_opportunities.jsonl`
-- `reconcile_engine_state()` — reconstrói `engine_state.json` a partir do `messages.jsonl` atual
-- `dedup_dispatch_state()` — remove entradas inválidas de `state.json`
-
-Você ainda pode rodar `python cleaner.py` manualmente a qualquer momento — o script continua funcionando isoladamente, o `engine.py` só automatizou a chamada periódica.
-
----
-
-## 🚀 Deploy 24/7 com pm2
-
-O `ecosystem.config.js` na raiz do projeto define os três processos, cada um com o `cwd` apontando pra sua pasta:
+### 4. Executar Migrações do Banco
 
 ```bash
-# 1. Iniciar os processos
-pm2 start ecosystem.config.js
+cd ../intel-engine
+source .venv/bin/activate
+python -c "
+from database import get_db_connection
+from pathlib import Path
+conn = get_db_connection()
+cur = conn.cursor()
+for m in ['../migrations/001_align_opportunities_contract.sql', '../migrations/002_add_inventory_sync_state.sql', '../migrations/003_relax_opportunity_property_reference.sql']:
+    cur.execute(Path(m).read_text(encoding='utf-8'))
+conn.commit()
+conn.close()
+"
+```
 
-# 2. Persistir a lista de processos atual
+### 5. Iniciar com PM2
+
+```bash
+cd ..
+pm2 start ecosystem.config.js
 pm2 save
-
-# 3. Gerar o script de boot (roda uma vez, copie e execute o comando que ele imprimir)
-pm2 startup
-
-# A partir daqui, os processos sobem sozinhos após reboot da máquina.
 ```
 
-Comandos úteis no dia a dia:
+Processos gerenciados pelo PM2:
+1. `sentinel-collector`: Escuta WhatsApp e publica em `raw_messages`.
+2. `sentinel-engine`: Consome mensagens, classifica com spaCy e projeta no Neo4j.
+3. `sentinel-egress`: Consome `opportunities_queue` e envia notificações via WhatsApp.
+4. `sentinel-inventory-sync`: Sincroniza periodicamente o inventário de imóveis no Neo4j.
+
+---
+
+## 🧪 Suíte de Testes
+
+Execute a suíte completa de testes unitários:
 
 ```bash
-pm2 status                     # visão geral dos processos
-pm2 logs sentinel-engine       # logs só do engine
-pm2 logs sentinel-collector    # logs só da coleta
-pm2 restart sentinel-egress    # reiniciar (ex: após trocar PRIORITY_CONTACT_ID)
-pm2 stop ecosystem.config.js   # parar tudo
+cd intel-engine
+source .venv/bin/activate
+python -m unittest discover -s tests
 ```
 
-`autorestart: true` no `ecosystem.config.js` garante que, se qualquer processo cair, o pm2 sobe de novo automaticamente — cada um de forma independente, sem afetar os outros dois.
+Executar teste de integração com o Neo4j ativo:
 
----
-
-## 🗂️ Estrutura do Projeto
-
-```
-sentinel_bot/
-├── data/                          # Dados e estado, compartilhados pelos 3 módulos (ignorados pelo git)
-│   ├── messages.jsonl
-│   ├── opportunities.jsonl        # oportunidades regulares (standby, ver CHANGELOG)
-│   ├── self_opportunities.jsonl   # oportunidades de imóveis próprios (prioritárias)
-│   ├── engine_state.json
-│   └── state.json
-├── intel-engine/                  # classificação, normalização, matching, cleanup (Python)
-│   ├── classifier.py
-│   ├── normalizer.py
-│   ├── matcher.py
-│   ├── database.py
-│   ├── egest.py
-│   ├── engine.py
-│   ├── cleaner.py
-│   ├── purge_user.py
-│   └── requirements.txt
-├── wpp-collector/                 # ingest: escuta o WhatsApp, grava messages.jsonl (Node)
-│   ├── main.js
-│   ├── package.json
-│   └── package-lock.json
-├── wpp-egress/                    # egest: envia as notificações via WhatsApp (Node)
-│   ├── main.js
-│   ├── package.json
-│   └── package-lock.json
-├── ecosystem.config.js            # configuração pm2 (os 3 processos)
-├── CHANGELOG.md
-├── LICENSE
-└── readme.md
+```bash
+RUN_NEO4J_INTEGRATION=1 python tests/test_neo4j_integration.py
 ```
 
 ---
 
-## 📋 Versões
+## 📊 Dashboard de Matches (Streamlit)
 
-Veja o [CHANGELOG](CHANGELOG.md) para o histórico completo de versões.
+O projeto inclui interface Streamlit para visualização em tempo real das conexões geradas no grafo:
 
-| Versão | Destaque |
-|--------|----------|
-| v1.7.0 | Priorização de imóveis próprios (`database.py`), cleaner integrado ao engine, deploy via pm2 com 3 processos independentes |
-| v1.6.2 | Correção de race condition no engine |
-| v1.6.0 | Pipeline de deduplicação completo |
-| v1.3.0 | Zone matching, sun_type, seafront e normalização |
-| v1.2.0 | Dados e estrutura de cleaner |
-| v1.1.0 | Matcher aprimorado |
-| v1.0.0 | Primeiro release estável |
-
----
-
-## 📄 Licença
-
-Este projeto está sob a licença MIT. Veja o arquivo [LICENSE](LICENSE) para mais detalhes.
+```bash
+streamlit run app.py
+```

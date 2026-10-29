@@ -73,13 +73,13 @@ def get_driver():
 def buscar_matches():
     """Roda a query Cypher de colisão entre Oferta e Demanda no mesmo bairro"""
     query = """
-    MATCH (c:Pessoa)-[:ENVIOU]->(mc:Mensagem)-[:BUSCA]->(i_busca:Imovel)-[:LOCALIZADO_EM]->(b:Bairro)
-    MATCH (v:Pessoa)-[:ENVIOU]->(mv:Mensagem)-[:OFERECE]->(i_oferta:Imovel)-[:LOCALIZADO_EM]->(b)
-    WHERE c <> v
+    MATCH (c:Pessoa)-[:CRIOU]->(d:Demanda)-[:BUSCA_EM]->(b:Bairro)
+    MATCH (v:Pessoa)-[:PUBLICOU]->(o:Oferta)-[:REFERE_SE_A]->(i:Imovel)-[:LOCALIZADO_EM]->(b)
+    WHERE c <> v AND d.status = 'ACTIVE' AND o.status = 'ACTIVE'
     RETURN c.nome AS Comprador, c.telefone AS Tel_Comprador,
            v.nome AS Vendedor, v.telefone AS Tel_Vendedor,
-           b.nome AS Bairro, i_oferta.preco AS Preco, 
-           i_oferta.quartos AS Quartos, i_oferta.tipo AS Tipo
+           b.nome AS Bairro, o.price AS Preco,
+           i.quartos AS Quartos, i.property_type AS Tipo
     LIMIT 20
     """
     driver = get_driver()
@@ -88,7 +88,7 @@ def buscar_matches():
             resultados = session.run(query).data()
         return resultados
     except Exception as e:
-        # Se o banco disser que a seta ainda não existe, retornamos vazio em silêncio.
+        # A interface é apenas uma visualização; falhas de consulta não devem derrubá-la.
         return []
     
 

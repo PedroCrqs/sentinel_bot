@@ -3,24 +3,46 @@ const path = require("path");
 const qrcode = require("qrcode-terminal");
 const { Client, LocalAuth } = require("whatsapp-web.js");
 const { Pool } = require("pg");
+const amqplib = require("amqplib");
 
 // Aponta para o arquivo .env na raiz do projeto
-require("dotenv").config({ path: path.resolve(__dirname, '../.env') });
+require("dotenv").config({ path: path.resolve(__dirname, "../.env") });
+
+// Configuração do RabbitMQ
+const RABBITMQ_URL = process.env.RABBITMQ_URL || "amqp://localhost:5672";
 
 // Configuração do Pool de Conexão com o PostgreSQL
 const pool = new Pool({
-  host: process.env.DB_HOST || "localhost",
-  port: process.env.DB_PORT || 5432,
-  database: process.env.DB_NAME || "sentinel_db",
-  user: process.env.DB_USER || "postgres",
-  password: process.env.DB_PASSWORD,
+  connectionString:
+    process.env.DATABASE_URL ||
+    "postgresql://postgres:CHANGE_ME@localhost:5432/sentinel_db",
 });
 
 const SESSION_PATH = path.join(__dirname, "session");
 
-const GROUP_ID = "120363424642701935@g.us";
-// Imóveis próprios: notificação prioritária vai direto por DM, não pro grupo
-const PRIORITY_CONTACT_ID = "96654279573661@lid";
+// Destinatários
+const GROUP_ID = process.env.GROUP_ID || "";
+const PRIORITY_CONTACT_ID = process.env.PRIORITY_CONTACT_ID || "";
+
+// Rate Limit para oportunidades de terceiros enviadas ao grupo
+// Padrão: no máximo 10 mensagens por hora para não poluir o grupo
+const MAX_GROUP_OPPS_PER_HOUR = parseInt(
+  process.env.MAX_GROUP_OPPS_PER_HOUR || "10",
+  10
+);
+const groupSentTimestamps = [];
+
+if (!GROUP_ID) {
+  console.warn(
+    "⚠️ [CONFIG] GROUP_ID não configurado no .env. As mensagens para o grupo ficarão em espera."
+  );
+}
+
+if (!PRIORITY_CONTACT_ID) {
+  console.warn(
+    "⚠️ [CONFIG] PRIORITY_CONTACT_ID não configurado no .env. Imóveis próprios usarão fallback para GROUP_ID se disponível."
+  );
+}
 
 if (!fs.existsSync(SESSION_PATH)) {
   fs.mkdirSync(SESSION_PATH, { recursive: true });
@@ -44,31 +66,43 @@ client.on("authenticated", () => {
   console.log("=".repeat(80));
 });
 
-client.once("ready", () => {
+client.once("ready", async () => {
   console.log("=".repeat(80));
-  console.log("SENTINEL RUNNING");
+  console.log("SENTINEL EGRESS RUNNING (RabbitMQ Worker v2.0.0)");
   console.log("=".repeat(80));
-  // TEMP (v1.7.0): dispatch de oportunidades regulares em standby.
-  // Só a notificação de imóveis próprios (dispatchSelfLoop) está ativa.
-  // Para reativar: descomente a linha abaixo.
-  // dispatchLoop();
-  
-  // Novo loop de dispatch integrado ao PostgreSQL
-  dispatchDatabaseLoop();
+
+  // Lista todos os chats e grupos para facilitar a captura de IDs
+  try {
+    const chats = await client.getChats();
+    const groups = chats.filter((c) => c.isGroup);
+    console.log(`📋 [CHATS DISPONÍVEIS] ${groups.length} grupo(s) encontrados na conta:`);
+    groups.forEach((g) => {
+      console.log(`   👉 Grupo: "${g.name}" | ID: ${g.id._serialized}`);
+    });
+  } catch (err) {
+    console.warn("[EGRESS] Não foi possível listar chats na inicialização:", err.message);
+  }
+
+  // Inicia o consumidor do RabbitMQ
+  startRabbitMQConsumer();
 });
 
-// client.on("message", async (message) => {
-//   const chat = await message.getChat();
-//   if (chat.isGroup) {
-//     console.log(`Grupo: ${chat.name}`);
-//     console.log(`ID: ${chat.id._serialized}`);
-//     console.log("=".repeat(80));
-//   }
-// });
+// Listener ao vivo: imprime o ID de qualquer chat que enviar mensagem
+client.on("message", async (message) => {
+  try {
+    const chat = await message.getChat();
+    const tipo = chat.isGroup ? "GRUPO" : "DM PRIVADA";
+    console.log(
+      `📌 [ID DETECTADO - ${tipo}] Nome: "${chat.name}" | ID: ${chat.id._serialized}`
+    );
+  } catch (err) {
+    // Silencioso
+  }
+});
 
 client.on("disconnected", (reason) => {
   console.log("=".repeat(80));
-  console.warn("DISCONECTED:", reason);
+  console.warn("DISCONNECTED:", reason);
   console.log("=".repeat(80));
 });
 
@@ -78,128 +112,178 @@ client.on("auth_failure", (msg) => {
   console.log("=".repeat(80));
 });
 
-async function dispatchDatabaseLoop() {
-  try {
-    // Busca até 5 oportunidades pendentes por vez no banco
-    const res = await pool.query(
-      "SELECT id, match_details FROM opportunities WHERE status = 'PENDING' ORDER BY created_at ASC LIMIT 5"
-    );
-
-    for (const row of res.rows) {
-      const opp = row.match_details;
-      
-      // Mantendo o prefixo e o destino do dispatchSelfLoop original
-      const prefix = "⭐ *IMÓVEL PRÓPRIO*";
-      const msg = `${prefix}\n\n${format(opp)}`;
-
-      await client.sendMessage(PRIORITY_CONTACT_ID, msg);
-      console.log(`Sent (db_self): ${row.id}`);
-
-      // Atualiza o status no banco para 'SENT'
-      await pool.query("UPDATE opportunities SET status = 'SENT' WHERE id = $1", [row.id]);
-
-      // Pausa de 2 segundos entre envios, conforme o código original
-      await new Promise((resolve) => setTimeout(resolve, 2000));
-    }
-  } catch (error) {
-    console.error(`Dispatch error (database):`, error.message);
+// ============================================================================
+// Identificador de Imóvel Próprio vs Imóvel de Terceiro
+// ============================================================================
+function isSelfOpportunity(opp) {
+  if (opp.offer_id && String(opp.offer_id).startsWith("self-offer:")) {
+    return true;
   }
-
-  // Roda novamente a cada 5 segundos
-  setTimeout(dispatchDatabaseLoop, 5000);
+  if (opp.matched_imovel_id !== null && opp.matched_imovel_id !== undefined) {
+    return true;
+  }
+  if (
+    opp.seller &&
+    opp.seller.name &&
+    String(opp.seller.name).includes("Majesto")
+  ) {
+    return true;
+  }
+  return false;
 }
 
-function format(o) {
-  const buyer = o.buyer.original_content;
-  const seller = o.seller.original_content;
+// ============================================================================
+// Controle de Fluxo por Hora para o Grupo
+// ============================================================================
+async function checkAndApplyGroupRateLimit() {
+  const ONE_HOUR_MS = 60 * 60 * 1000;
+  const now = Date.now();
 
-  const formatPrice = (price) => {
-    if (!price) return "Não informado";
-    return `R$ ${price.toLocaleString("pt-BR")}`;
-  };
+  // Limpa registros mais antigos que 1 hora
+  while (
+    groupSentTimestamps.length > 0 &&
+    now - groupSentTimestamps[0] >= ONE_HOUR_MS
+  ) {
+    groupSentTimestamps.shift();
+  }
 
-  const formatArea = (area) => {
-    if (!area) return "";
-    return `${area}m²`;
-  };
+  // Se atingiu a cota máxima na última hora, aguarda a liberação da vaga mais antiga
+  if (groupSentTimestamps.length >= MAX_GROUP_OPPS_PER_HOUR) {
+    const oldestTimestamp = groupSentTimestamps[0];
+    const waitTimeMs = ONE_HOUR_MS - (now - oldestTimestamp) + 1000;
+    console.log(
+      `⏳ [RATE LIMIT GRUPO] Limite de ${MAX_GROUP_OPPS_PER_HOUR} envios/hora atingido. Aguardando ${Math.ceil(
+        waitTimeMs / 1000
+      )}s para despachar o próximo...`
+    );
+    await new Promise((resolve) => setTimeout(resolve, waitTimeMs));
+    return checkAndApplyGroupRateLimit();
+  }
 
-  const formatBedrooms = (bedrooms) => {
-    if (!bedrooms) return "";
-    return `${bedrooms} quarto${bedrooms > 1 ? "s" : ""}`;
-  };
+  groupSentTimestamps.push(Date.now());
+}
 
-  const formatNeighborhood = (neighborhoods, subNeighborhood) => {
-    if (!neighborhoods || neighborhoods.length === 0) return "Não informado";
-    if (subNeighborhood) {
-      const parent = neighborhoods.find((n) => n !== subNeighborhood);
-      return parent ? `${parent} › ${subNeighborhood}` : subNeighborhood;
-    }
-    return neighborhoods.join(", ");
-  };
+// ============================================================================
+// Consumidor Orientado a Eventos do RabbitMQ
+// ============================================================================
+async function startRabbitMQConsumer() {
+  try {
+    const connection = await amqplib.connect(RABBITMQ_URL);
+    const channel = await connection.createChannel();
 
-  const formatCondominium = (condominium) => {
-    if (!condominium) return null;
-    if (Array.isArray(condominium)) {
-      return condominium.length > 0 ? condominium.join(", ") : null;
-    }
-    return condominium;
-  };
+    await channel.assertQueue("opportunities_queue", { durable: true });
+    channel.prefetch(1);
 
-  let message = `🔥 *OPORTUNIDADE* | Score: ${o.score}\n`;
+    console.log("🐰 [RABBITMQ] Escutando a fila 'opportunities_queue'...");
+
+    channel.consume("opportunities_queue", async (msg) => {
+      if (msg !== null) {
+        const payload = JSON.parse(msg.content.toString());
+        const oppId = payload.opportunity_id;
+
+        try {
+          // Busca os detalhes da oportunidade direto no banco
+          const res = await pool.query(
+            "SELECT match_details FROM opportunities WHERE opportunity_id = $1",
+            [oppId]
+          );
+
+          if (res.rows.length > 0) {
+            const opp = res.rows[0].match_details;
+            const isSelf = isSelfOpportunity(opp);
+
+            // ================================================================
+            // NOTA / REFINAMENTO FUTURO: Filtro por Score Mínimo
+            // Mantido comentado na v2.0.0 para não descartar matches em fase de teste.
+            // const MIN_MATCH_SCORE_GROUP = 50;
+            // if (!isSelf && (opp.score || 0) < MIN_MATCH_SCORE_GROUP) {
+            //   console.log(`[EGRESS] Opp ${oppId} ignorada por score baixo: ${opp.score}`);
+            //   channel.ack(msg);
+            //   return;
+            // }
+            // ================================================================
+
+            let destination = "";
+            let logType = "";
+
+            if (isSelf) {
+              // Imóveis próprios: prioridade DM direta
+              destination = PRIORITY_CONTACT_ID || GROUP_ID;
+              logType = "IMÓVEL PRÓPRIO (DM)";
+            } else {
+              // Imóveis de parceiros: grupo de corretores com controle de taxa
+              await checkAndApplyGroupRateLimit();
+              destination = GROUP_ID;
+              logType = "PARCERIA/TERCEIRO (GRUPO)";
+            }
+
+            if (!destination) {
+              console.warn(
+                `⚠️ [EGRESS] Destinatário não configurado para ${logType}. Oportunidade ${oppId} não enviada.`
+              );
+              channel.ack(msg);
+              return;
+            }
+
+            const wppMessage = format(opp, isSelf);
+            await client.sendMessage(destination, wppMessage);
+
+            console.log(
+              `✅ [EGRESS] Oportunidade ${oppId} [${logType}] enviada com sucesso para ${destination}!`
+            );
+
+            // Atualiza status no banco
+            await pool.query(
+              "UPDATE opportunities SET dispatch_status = 'SENT' WHERE opportunity_id = $1",
+              [oppId]
+            );
+          }
+
+          // Confirmação para RabbitMQ
+          channel.ack(msg);
+
+          // Pausa de 2 segundos de segurança para o WhatsApp
+          await new Promise((resolve) => setTimeout(resolve, 2000));
+        } catch (error) {
+          console.error(
+            `❌ [EGRESS ERRO] Falha ao enviar oportunidade ${oppId}:`,
+            error.message
+          );
+          channel.nack(msg, false, true);
+        }
+      }
+    });
+  } catch (error) {
+    console.error("❌ [RABBITMQ] Erro no consumidor do Egress:", error);
+  }
+}
+
+function format(o, isSelf) {
+  const buyer = o.buyer || {};
+  const seller = o.seller || {};
+
+  const header = isSelf
+    ? "⭐ *OPORTUNIDADE — IMÓVEL PRÓPRIO*"
+    : "🔥 *OPORTUNIDADE DE PARCERIA*";
+
+  let message = `${header} | Score: ${o.score || 0}\n`;
   message += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n`;
 
   message += `👤 *COMPRADOR*\n`;
-  message += `Corretor: ${buyer.author_name}\n`;
-  message += `Telefone: ${buyer.author_phone || "Não informado"}\n`;
-  message += `📍 ${formatNeighborhood(o.buyer.neighborhood, o.buyer.sub_neighborhood)}\n`;
-  message += `💰 Até ${formatPrice(o.buyer.price)}\n`;
-
-  const buyerDetails = [];
-  if (o.buyer.bedrooms) buyerDetails.push(formatBedrooms(o.buyer.bedrooms));
-  if (o.buyer.area_m2) buyerDetails.push(formatArea(o.buyer.area_m2));
-  if (o.buyer.property_type) buyerDetails.push(o.buyer.property_type);
-  if (buyerDetails.length > 0) {
-    message += `🏠 ${buyerDetails.join(" • ")}\n`;
-  }
-
-  const buyerCond = formatCondominium(o.buyer.condominium);
-  if (buyerCond) message += `🏘️ Cond: ${buyerCond}\n`;
-  if (o.buyer.nearbeach) message += `🌊 Próximo à praia\n`;
-  if (o.buyer.seafront) message += `🏖️ Frente mar\n`;
-  if (o.buyer.sun_type)
-    message += `☀️ Sol: ${o.buyer.sun_type.charAt(0) + o.buyer.sun_type.slice(1).toLowerCase()}\n`;
-  if (o.buyer.parking_spots)
-    message += `🚗 ${o.buyer.parking_spots} vaga${o.buyer.parking_spots > 1 ? "s" : ""}\n`;
-  if (o.buyer.zone) message += `🗺️ Zona: ${o.buyer.zone}\n`;
-
-  message += `\nTexto original:\n_${o.buyer.raw_text}_\n`;
+  message += `Nome: ${buyer.name || "Não informado"}\n`;
+  message += `Telefone: ${buyer.phone || "Não informado"}\n`;
+  message += `\nTexto original:\n_${buyer.raw_text || "Sem texto"}_\n`;
 
   message += `\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n`;
 
-  message += `🏢 *VENDEDOR*\n`;
-  message += `Corretor: ${seller.author_name}\n`;
-  message += `Telefone: ${seller.author_phone || "Não informado"}\n`;
-  message += `📍 ${formatNeighborhood(o.seller.neighborhood, o.seller.sub_neighborhood)}\n`;
-  message += `💰 ${formatPrice(o.seller.price)}\n`;
+  const sellerLabel = isSelf
+    ? "🏢 *VENDEDOR (INVENTÁRIO PRÓPRIO MAJESTO)*"
+    : "🏢 *VENDEDOR (PARCEIRO)*";
 
-  const sellerDetails = [];
-  if (o.seller.bedrooms) sellerDetails.push(formatBedrooms(o.seller.bedrooms));
-  if (o.seller.area_m2) sellerDetails.push(formatArea(o.seller.area_m2));
-  if (o.seller.property_type) sellerDetails.push(o.seller.property_type);
-  if (sellerDetails.length > 0) {
-    message += `🏠 ${sellerDetails.join(" • ")}\n`;
-  }
-
-  const sellerCond = formatCondominium(o.seller.condominium);
-  if (sellerCond) message += `🏘️ Cond: ${sellerCond}\n`;
-  if (o.seller.nearbeach) message += `🌊 Próximo à praia\n`;
-  if (o.seller.seafront) message += `🏖️ Frente mar\n`;
-  if (o.seller.sun_type)
-    message += `☀️ Sol: ${o.seller.sun_type.charAt(0) + o.seller.sun_type.slice(1).toLowerCase()}\n`;
-  if (o.seller.parking_spots)
-    message += `🚗 ${o.seller.parking_spots} vaga${o.seller.parking_spots > 1 ? "s" : ""}\n`;
-
-  message += `\nTexto original:\n_${o.seller.raw_text}_`;
+  message += `${sellerLabel}\n`;
+  message += `Nome: ${seller.name || "Não informado"}\n`;
+  message += `Telefone: ${seller.phone || "Não informado"}\n`;
+  message += `\nTexto original:\n_${seller.raw_text || "Sem texto"}_`;
 
   return message;
 }

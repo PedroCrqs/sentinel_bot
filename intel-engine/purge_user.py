@@ -1,72 +1,46 @@
-import json
+import sys
+from database import get_db_connection
+from graphs.neo4j_client import GraphClient
 
-MESSAGES_FILE = "../data/messages.jsonl"
-OPPORTUNITIES_FILE = "../data/opportunities.jsonl"
-# Add id from user who you want to purge
 BLOCKED_ID = "228707713171512@lid"
 
-
-def purge_messages():
+def purge_user(blocked_id: str):
+    print(f"[PURGE] Iniciando expurgo total do usuário: {blocked_id}")
+    
+    # 1. PostgreSQL
     try:
-        with open(MESSAGES_FILE, "r", encoding="utf-8") as f:
-            lines = f.readlines()
-    except FileNotFoundError:
-        print(f"[PURGE] {MESSAGES_FILE} não encontrado, pulando.")
-        return
+        conn = get_db_connection()
+        with conn:
+            with conn.cursor() as cursor:
+                # O ON DELETE CASCADE cuidará de deletar as oportunidades ligadas a essas mensagens
+                cursor.execute(
+                    "DELETE FROM raw_messages WHERE author_id = %s OR author_phone = %s", 
+                    (blocked_id, blocked_id)
+                )
+                deleted_rows = cursor.rowcount
+            conn.commit()
+        print(f"[PURGE] PostgreSQL: {deleted_rows} mensagens de {blocked_id} apagadas (matches em cascata deletados).")
+    except Exception as e:
+        print(f"[PURGE] Erro no PostgreSQL: {e}")
 
-    kept, removed = [], 0
-    for line in lines:
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            msg = json.loads(line)
-            if msg.get("author_id") == BLOCKED_ID:
-                removed += 1
-            else:
-                kept.append(line)
-        except json.JSONDecodeError:
-            kept.append(line)
-
-    with open(MESSAGES_FILE, "w", encoding="utf-8") as f:
-        f.write("\n".join(kept) + ("\n" if kept else ""))
-
-    print(f"[PURGE] messages.jsonl: {removed} removidas, {len(kept)} mantidas.")
-
-
-def purge_opportunities():
+    # 2. Neo4j
     try:
-        with open(OPPORTUNITIES_FILE, "r", encoding="utf-8") as f:
-            lines = f.readlines()
-    except FileNotFoundError:
-        print(f"[PURGE] {OPPORTUNITIES_FILE} não encontrado, pulando.")
-        return
-
-    kept, removed = [], 0
-    for line in lines:
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            opp = json.loads(line)
-            buyer_id = opp.get("buyer", {}).get("original_content", {}).get("author_id")
-            seller_id = (
-                opp.get("seller", {}).get("original_content", {}).get("author_id")
-            )
-            if BLOCKED_ID in (buyer_id, seller_id):
-                removed += 1
-            else:
-                kept.append(line)
-        except json.JSONDecodeError:
-            kept.append(line)
-
-    with open(OPPORTUNITIES_FILE, "w", encoding="utf-8") as f:
-        f.write("\n".join(kept) + ("\n" if kept else ""))
-
-    print(f"[PURGE] opportunities.jsonl: {removed} removidas, {len(kept)} mantidas.")
-
+        graph = GraphClient()
+        query = """
+        MATCH (p:Pessoa) WHERE p.telefone = $blocked_id OR p.nome = $blocked_id OR p.pessoa_id = $blocked_id
+        OPTIONAL MATCH (p)-[:ENVIOU]->(m:Mensagem)
+        DETACH DELETE m, p
+        """
+        with graph.driver.session() as session:
+            session.run(query, blocked_id=blocked_id)
+        graph.close()
+        print(f"[PURGE] Neo4j: Usuário {blocked_id} e suas mensagens/arestas foram expurgados.")
+    except Exception as e:
+        print(f"[PURGE] Erro no Neo4j: {e}")
 
 if __name__ == "__main__":
-    purge_messages()
-    purge_opportunities()
+    if len(sys.argv) > 1:
+        purge_user(sys.argv[1])
+    else:
+        purge_user(BLOCKED_ID)
     print("[PURGE] Concluído.")
