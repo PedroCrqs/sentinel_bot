@@ -252,7 +252,10 @@ class GraphClient:
         WHERE d.status = 'ACTIVE'
           AND o.status = 'ACTIVE'
           AND comprador.person_id <> vendedor.person_id
-          AND (d.price IS NULL OR (o.price IS NOT NULL AND o.price <= d.price))
+          // Preço é critério obrigatório: ambos devem possuir preço e a oferta deve caber no teto da demanda
+          AND d.price IS NOT NULL
+          AND o.price IS NOT NULL
+          AND o.price <= d.price
           AND (d.bedrooms IS NULL OR (i.quartos IS NOT NULL AND i.quartos >= d.bedrooms))
           AND (coalesce(d.seafront, false) = false OR i.frente_mar = true)
 
@@ -260,16 +263,25 @@ class GraphClient:
         WITH d, o, i, comprador, vendedor, m_busca, m_oferece,
              collect(DISTINCT b.nome) AS matched_neighborhoods
 
-        // Tipo permanece preferência (comportamento anterior), não hard constraint.
-        // Preço/quartos só pontuam quando os dois lados possuem o dado.
+        // Calibração de pontuação:
+        // - Base de compatibilidade espacial: 15 pts
+        // - Compatibilidade estrita de preço: 20 pts
+        // - Super prioridade para inventário próprio Majesto: 35 pts
+        // - Quartos adequados: 15 pts
+        // - Tipologia compatível: 10 pts
+        // - Área compatível: 10 pts
+        // - Vagas de garagem: 5 pts
+        // - Frente mar: 10 pts
+        // - Condomínio fechado: 5 pts
+        // - Posição solar: 5 pts
+        // - Próximo à praia: 5 pts
         WITH d, o, i, comprador, vendedor, m_busca, m_oferece, matched_neighborhoods,
-             CASE WHEN d.price IS NOT NULL AND o.price IS NOT NULL THEN 10 ELSE 0 END
-                 + CASE WHEN d.bedrooms IS NOT NULL AND i.quartos IS NOT NULL THEN 10 ELSE 0 END
-                 + 5 AS score_base,
+             15 + 20 + CASE WHEN d.bedrooms IS NOT NULL AND i.quartos IS NOT NULL THEN 15 ELSE 0 END AS score_base,
+             CASE WHEN o.offer_id STARTS WITH 'self-offer:' OR vendedor.person_id = 'system:majesto' THEN 35 ELSE 0 END AS score_inventory,
              CASE WHEN d.property_type IS NOT NULL AND i.property_type IS NOT NULL
-                       AND d.property_type = i.property_type THEN 5 ELSE 0 END AS score_type,
+                       AND d.property_type = i.property_type THEN 10 ELSE 0 END AS score_type,
              CASE WHEN d.area IS NOT NULL AND i.area IS NOT NULL AND i.area >= d.area
-                       THEN 5 ELSE 0 END AS score_area,
+                       THEN 10 ELSE 0 END AS score_area,
              CASE WHEN d.parking_spots IS NOT NULL AND i.vagas IS NOT NULL
                        AND i.vagas >= d.parking_spots THEN 5 ELSE 0 END AS score_parking,
              CASE WHEN d.seafront = true AND i.frente_mar = true THEN 10 ELSE 0 END AS score_seafront,
@@ -279,9 +291,9 @@ class GraphClient:
              CASE WHEN d.nearbeach = true AND i.perto_praia = true THEN 5 ELSE 0 END AS score_nearbeach
 
         WITH d, o, i, comprador, vendedor, m_busca, m_oferece, matched_neighborhoods,
-             score_base, score_type, score_area, score_parking, score_seafront,
+             score_base, score_inventory, score_type, score_area, score_parking, score_seafront,
              score_condominium, score_sun, score_nearbeach,
-             score_base + score_type + score_area + score_parking + score_seafront
+             score_base + score_inventory + score_type + score_area + score_parking + score_seafront
                  + score_condominium + score_sun + score_nearbeach AS score_final
 
         RETURN
@@ -303,6 +315,7 @@ class GraphClient:
             o.price AS offer_price,
             i.quartos AS property_bedrooms,
             score_base,
+            score_inventory,
             score_type,
             score_area,
             score_parking,
@@ -356,6 +369,7 @@ class GraphClient:
                         },
                         "score_breakdown": {
                             "base": record["score_base"],
+                            "inventory": record.get("score_inventory", 0),
                             "type": record["score_type"],
                             "area": record["score_area"],
                             "parking": record["score_parking"],

@@ -23,15 +23,20 @@ Based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **Dedicated Inventory Snapshot/Diff Sync Worker (`inventory_sync_worker.py`)**:
   - Autonomous long-running worker syncing `public.imoveis` from PostgreSQL with Neo4j.
   - Fingerprint-based state tracking in `public.inventory_sync_state`.
-- **Cleaner Pipeline Overhaul**:
+- **Cleaner Pipeline Overhaul & Automated Engine Daemon**:
+  - Background daemon thread integrated directly into `engine.py`, executing every 6 hours automatically.
   - Strict 90-day expiration window for external property offers.
   - Strict 15-day expiration window for buyer demands.
-  - Automated purge of orphaned nodes and duplicates across PostgreSQL and Neo4j.
+  - Automated purge of orphaned `Imovel` and `Pessoa` nodes and duplicates across PostgreSQL and Neo4j, while strictly protecting Majesto inventory properties.
+- **Historical Backfill Script (`backfill_history.py`)**:
+  - Loads 90-day historical messages from PostgreSQL, classifies and normalizes entities, populates Neo4j, and marks records as `PROCESSED`.
 
 #### Changed
 
-- Strict routing in egress: own properties from `public.imoveis` (identified by `self-offer:`) route exclusively to priority private DM (`PRIORITY_CONTACT_ID`), while third-party partner matches route to the designated team group (`GROUP_ID`).
-- Sanitized numeric types: converted PostgreSQL `decimal.Decimal` to `float` across adapters to prevent Bolt serialization exceptions.
+- **Mandatory Price Compatibility in Matcher**: Location alone no longer qualifies an opportunity. Both demand and offer must specify a price, and offer price must be less than or equal to buyer budget (`o.price <= d.price`).
+- **Strict Egress Score Filtering**: Third-party partner opportunities are filtered at egress to dispatch only opportunities with score strictly greater than 50 (`score > 50`), discarding low-confidence matches.
+- **Heavy Prioritization of Majesto Inventory**: Own properties from `public.imoveis` receive a +35 priority score bonus and route exclusively to priority private DM (`PRIORITY_CONTACT_ID`) with **no hourly rate limit**.
+- **Sanitized Numeric Types**: Converted PostgreSQL `decimal.Decimal` to `float` across adapters to prevent Bolt serialization exceptions.
 
 ---
 
@@ -51,15 +56,38 @@ Based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **Worker Dedicado de Sincronização de Inventário (`inventory_sync_worker.py`)**:
   - Processo de background autônomo que sincroniza a tabela `public.imoveis` com o Neo4j.
   - Rastreamento por fingerprints SHA-256 na tabela `public.inventory_sync_state`.
-- **Reformulação do Pipeline de Limpeza (`cleaner.py`)**:
+- **Reformulação do Pipeline de Limpeza & Daemon Automatizado no Engine**:
+  - Thread daemon em segundo plano integrada diretamente ao `engine.py`, executando a cada 6 horas automaticamente.
   - Janela estrita de expiração de **90 dias** para ofertas de imóveis de terceiros.
   - Janela estrita de expiração de **15 dias** para demandas de compradores.
-  - Expurgo automatizado de nós órfãos e duplicatas em cascata no Neo4j e PostgreSQL.
+  - Expurgo automatizado de nós órfãos (`Imovel` e `Pessoa`) e oportunidades antigas no Neo4j e PostgreSQL, protegendo estritamente o inventário Majesto.
+- **Script de Carga e Backfill Histórico (`backfill_history.py`)**:
+  - Carrega mensagens dos últimos 90 dias do PostgreSQL, processa via PLN spaCy, normaliza entidades, projeta no Neo4j e atualiza status no banco relacional.
 
 #### Alterado
 
-- Roteamento estrito no egress: imóveis próprios da tabela `public.imoveis` (`self-offer:`) são enviados exclusivamente para a DM privada prioritária (`PRIORITY_CONTACT_ID`), enquanto matches entre terceiros vão para o grupo da equipe (`GROUP_ID`).
-- Sanitização de tipos numéricos: conversão de `decimal.Decimal` do PostgreSQL para `float` em todos os adaptadores para compatibilidade com o protocolo Bolt.
+- **Compatibilidade Obrigatória de Preço no Matcher**: Apenas o bairro compartilhado não gera mais oportunidades. É obrigatório que ambos os lados possuam preço e que a oferta caiba no orçamento do comprador (`o.price <= d.price`).
+- **Filtro Estrito por Score no Egress**: Oportunidades de parceiros passam por validação de score mínimo (`score > 50`) antes do envio, descartando matches com baixa precisão.
+- **Super Prioridade para Inventário Majesto**: Imóveis próprios recebem +35 pontos de bônus no cálculo de score e são despachados diretamente na DM privada prioritária (`PRIORITY_CONTACT_ID`) **sem limite de envios por hora**.
+- **Sanitização de Tipos Numéricos**: Conversão de `decimal.Decimal` do PostgreSQL para `float` em todos os adaptadores para compatibilidade com o protocolo Bolt.
+
+---
+
+## [1.7.1] - 2026-07-17
+
+### English
+
+#### Fixed
+
+- `wpp-collector/package.json` / `wpp-egress/package.json`: Updated `whatsapp-web.js` dependency to tracking fork (`github:lindionez/whatsapp-web.js#feat/fix-_serialized-id-fallback`). This handles the July 2026 WhatsApp Web infrastructure update that renamed internal message/contact serialized IDs from `_serialized` to `$1`, preventing immediate `TypeError` crashes across the collection and egress pipelines.
+
+---
+
+### Português
+
+#### Corrigido
+
+- `wpp-collector/package.json` / `wpp-egress/package.json`: Atualizada a dependência `whatsapp-web.js` para o fork de correção da comunidade (`github:lindionez/whatsapp-web.js#feat/fix-_serialized-id-fallback`). A alteração resolve o crash por `TypeError` causado pela mudança interna do WhatsApp Web (julho de 2026), que alterou a propriedade de IDs serializados de `_serialized` para `$1`, normalizando o pipeline de coleta e envio.
 
 ---
 

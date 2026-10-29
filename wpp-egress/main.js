@@ -24,6 +24,9 @@ const SESSION_PATH = path.join(__dirname, "session");
 const GROUP_ID = process.env.GROUP_ID || "";
 const PRIORITY_CONTACT_ID = process.env.PRIORITY_CONTACT_ID || "";
 
+// Score mínimo para despacho de oportunidades de parceiros
+const MIN_MATCH_SCORE = parseInt(process.env.MIN_MATCH_SCORE || "50", 10);
+
 // Rate Limit para oportunidades de terceiros enviadas ao grupo
 // Padrão: no máximo 10 mensagens por hora para não poluir o grupo
 const MAX_GROUP_OPPS_PER_HOUR = parseInt(
@@ -170,23 +173,26 @@ async function startRabbitMQConsumer() {
             const isSelf = isSelfOpportunity(opp);
 
             // ================================================================
-            // NOTA / REFINAMENTO FUTURO: Filtro por Score Mínimo
-            // Mantido comentado na v2.0.0 para não descartar matches em fase de teste.
-            // const MIN_MATCH_SCORE_GROUP = 50;
-            // if (!isSelf && (opp.score || 0) < MIN_MATCH_SCORE_GROUP) {
-            //   console.log(`[EGRESS] Opp ${oppId} ignorada por score baixo: ${opp.score}`);
-            //   channel.ack(msg);
-            //   return;
-            // }
+            // Regra de Negócio: Egress só envia oportunidades com score > 50.
+            // Imóveis próprios Majesto recebem super prioridade no engine e são enviados
+            // sem qualquer limite de taxa por hora diretamente para a DM prioritária.
             // ================================================================
+            const score = Number(opp.score || 0);
+            if (!isSelf && score <= MIN_MATCH_SCORE) {
+              console.log(
+                `⏭️ [EGRESS] Opp de parceiro ${oppId} descartada por score insuficiente: ${score} (mínimo exigido: > ${MIN_MATCH_SCORE})`
+              );
+              channel.ack(msg);
+              return;
+            }
 
             let destination = "";
             let logType = "";
 
             if (isSelf) {
-              // Imóveis próprios: vão direto para a DM prioritária
+              // Imóveis próprios Majesto: envio direto e prioritário na DM sem limite por hora
               destination = PRIORITY_CONTACT_ID || GROUP_ID;
-              logType = "IMÓVEL PRÓPRIO (DM)";
+              logType = "IMÓVEL PRÓPRIO MAJESTO (DM - SEM LIMITE)";
             } else {
               // Imóveis de parceiros (terceiros): vão para o grupo com limitador de taxa
               await checkAndApplyGroupRateLimit();

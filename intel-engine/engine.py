@@ -1,5 +1,7 @@
 import json
 import logging
+import time
+import threading
 
 import pika
 
@@ -7,6 +9,7 @@ from classifier import run_classifier
 from normalizer import run_normalizer
 from graphs.neo4j_client import GraphClient
 from runtime_config import rabbitmq_url
+from cleaner import run_cleaner
 
 from database import get_message_by_id, update_message_status, save_opportunities
 
@@ -91,6 +94,25 @@ def on_message(ch, method, properties, body):
     return True
 
 
+def _cleaner_loop(interval_hours: int = 6):
+    """Executa a limpeza periódica do Neo4j e PostgreSQL em segundo plano."""
+    interval_seconds = interval_hours * 3600
+    while True:
+        try:
+            LOGGER.info("iniciando ciclo periódico do cleaner")
+            run_cleaner()
+            LOGGER.info("ciclo do cleaner concluído com sucesso")
+        except Exception as exc:
+            LOGGER.error("erro durante execução do cleaner: %s", exc)
+        time.sleep(interval_seconds)
+
+
+def start_cleaner_daemon(interval_hours: int = 6):
+    thread = threading.Thread(target=_cleaner_loop, args=(interval_hours,), daemon=True)
+    thread.start()
+    LOGGER.info("cleaner daemon iniciado (intervalo: %dh)", interval_hours)
+
+
 def main():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     LOGGER.info("connecting to RabbitMQ")
@@ -101,6 +123,9 @@ def main():
     channel.queue_declare(queue="opportunities_queue", durable=True)
     channel.basic_qos(prefetch_count=1)
     channel.basic_consume(queue="raw_messages", on_message_callback=on_message)
+
+    # Inicia a faxina periódica (90d ofertas / 15d demandas / órfãos)
+    start_cleaner_daemon(interval_hours=6)
 
     LOGGER.info("engine worker active")
     channel.start_consuming()

@@ -64,6 +64,46 @@ O Sentinel Bot é composto por **4 serviços desacoplados**, orquestrados pelo *
 
 ---
 
+## 🎯 Regras de Negócio, Matching e Scoring
+
+### 1. Critérios de Compatibilidade (Cypher Match)
+- **Localização e Bairro**: O comprador e o imóvel devem compartilhar ao menos um bairro de interesse.
+- **Preço Obrigatório**: **É imprescindível que o preço bata**. Ambos os lados devem informar preço e `Oferta.price <= Demanda.price`. Mensagens sem preço ou fora do teto não geram oportunidade.
+- **Tipologia e Quartos**: Quartos devem atender ao mínimo da demanda (`Imovel.quartos >= Demanda.bedrooms`), caso informado.
+- **Frente Mar**: Se o comprador exigir frente mar, o imóvel obrigatoriamente deve possuir frente mar.
+
+### 2. Tabela de Pontuação (Score)
+| Critério | Pontuação | Descrição |
+|---|---|---|
+| **Base + Bairro** | **15 pts** | Localização compatível entre demanda e oferta |
+| **Preço Válido** | **20 pts** | Preço dentro do teto estipulado pelo comprador |
+| **Inventário Majesto** | **+35 pts** | **Super prioridade** para imóveis próprios da base |
+| **Quartos** | **15 pts** | Quantidade de quartos compatível |
+| **Tipologia** | **10 pts** | Tipo de imóvel (Apartamento, Casa, Cobertura, etc.) |
+| **Área** | **10 pts** | Metragem privativa compatível |
+| **Frente Mar** | **10 pts** | Imóvel frente mar atendendo à exigência |
+| **Vagas de Garagem** | **5 pts** | Quantidade de vagas atendida |
+| **Condomínio** | **5 pts** | Condomínio fechado |
+| **Posição Solar** | **5 pts** | Sol da manhã / passante |
+| **Próximo à Praia** | **5 pts** | Imóvel perto da praia |
+
+### 3. Filtros do Egress (WhatsApp)
+- **Score Mínimo**: Apenas oportunidades com **`score > 50`** são disparadas pelo `wpp-egress`. Oportunidades com pontuação inferior são descartadas para evitar ruído.
+- **Inventário Majesto (DM Prioritária)**: Matches com imóveis próprios vão diretamente para o contato privado (`PRIORITY_CONTACT_ID`) **sem limite de envios por hora**.
+- **Parcerias / Terceiros (Grupo)**: Matches entre corretores parceiros vão para o grupo (`GROUP_ID`) com limitador de vazão de segurança (`MAX_GROUP_OPPS_PER_HOUR`, padrão 10 envios/hora).
+
+---
+
+## 🧹 Política de Retenção e Faxina (Cleaner)
+
+O módulo `cleaner.py` roda de forma contínua e automatizada via daemon em segundo plano no `sentinel-engine` (a cada 6 horas):
+- **Ofertas de Terceiros**: Mantidas por no máximo **90 dias** (removidas do Neo4j e PostgreSQL).
+- **Demandas de Compradores**: Mantidas por no máximo **15 dias** (removidas do Neo4j e PostgreSQL).
+- **Inventário Majesto**: **Nunca é expurgado por tempo**, sendo gerenciado exclusivamente pelo `inventory_sync_worker`.
+- **Nós Órfãos**: Limpeza em cascata de nós `Imovel` de terceiros sem ofertas ativas e nós `Pessoa` sem ofertas ou demandas vinculadas.
+
+---
+
 ## ⚙️ Variáveis de Ambiente (`.env`)
 
 Crie o arquivo `.env` na raiz do projeto com base no `.env.example`:

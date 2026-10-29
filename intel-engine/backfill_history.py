@@ -13,7 +13,7 @@ import logging
 from classifier import run_classifier
 from normalizer import run_normalizer
 from graphs.neo4j_client import GraphClient
-from database import get_db_connection
+from database import get_db_connection, update_message_status
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 LOGGER = logging.getLogger("backfill")
@@ -103,7 +103,22 @@ def run_backfill():
 
         LOGGER.info("Ingestão concluída no Neo4j: %d Ofertas | %d Demandas.", ingested_sellers, ingested_buyers)
 
-        # 6. Avaliação de Oportunidades geradas
+        # 6. Atualização de status no PostgreSQL
+        LOGGER.info("Atualizando status das mensagens no PostgreSQL...")
+        for s in sellers_pad:
+            mid = s.get("original_content", {}).get("message_id")
+            if mid:
+                update_message_status(mid, "PROCESSED", normalized_data=s)
+        for b in buyers_pad:
+            mid = b.get("original_content", {}).get("message_id")
+            if mid:
+                update_message_status(mid, "PROCESSED", normalized_data=b)
+        for u in useless:
+            mid = u.data.get("message_id") if hasattr(u, "data") else u.get("message_id")
+            if mid:
+                update_message_status(mid, "PROCESSED")
+
+        # 7. Avaliação de Oportunidades geradas (critério: preço obrigatório e score > 50)
         opps = graph.match_opportunities()
         LOGGER.info("🎉 TOTAL DE MATCHES IDENTIFICADOS NO GRAFO: %d", len(opps))
         for o in opps[:5]:

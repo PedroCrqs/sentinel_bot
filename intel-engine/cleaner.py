@@ -15,41 +15,49 @@ def purge_old_data_neo4j(limite_15d: int, limite_90d: int):
     """
     Remove mensagens e nós expirados do grafo Neo4j e limpa nós órfãos.
     Regra de Negócio:
-      - Ofertas de terceiros com mais de 90 dias são expurgadas.
-      - Demandas de compradores com mais de 15 dias são expurgadas.
+      - Ofertas de terceiros com mais de 90 dias são expurgadas (junto com a mensagem de origem).
+      - Demandas de compradores com mais de 15 dias são expurgadas (junto com a mensagem de expressão).
       - Imóveis próprios do inventário Majesto NUNCA são expurgados por tempo (são controlados pelo sync).
+      - Nós órfãos de Imóveis (sem nenhuma oferta associada) e Pessoas (sem ofertas ou demandas ativas) são removidos.
     """
     try:
         graph = GraphClient()
-        query = """
-        // 1. Apaga mensagens e nós de OFERTA de terceiros mais velhas que 90 dias
-        MATCH (m:Mensagem)-[:ORIGINA]->(o:Oferta)
-        WHERE m.timestamp < $limite_90d
-        DETACH DELETE m, o
-
-        WITH 1 AS dummy
-
-        // 2. Apaga mensagens e nós de DEMANDA (compradores) mais velhas que 15 dias
-        MATCH (m:Mensagem)-[:EXPRESSA]->(d:Demanda)
-        WHERE m.timestamp < $limite_15d
-        DETACH DELETE m, d
-
-        WITH 1 AS dummy
-
-        // 3. Apaga Imóveis que não estão ligados a nenhuma Oferta ativa (órfãos de terceiros)
-        MATCH (i:Imovel)
-        WHERE NOT ()-[:REFERE_SE_A]->(i) AND NOT ()-[:LOCALIZADO_EM]->(i) AND NOT (i)-[:LOCALIZADO_EM]->()
-        DETACH DELETE i
-
-        WITH 1 AS dummy
-
-        // 4. Apaga Pessoas que não criaram Demanda nem publicaram Oferta ativa
-        MATCH (p:Pessoa)
-        WHERE NOT (p)-[:CRIOU]->() AND NOT (p)-[:PUBLICOU]->() AND p.person_id <> 'system:majesto'
-        DETACH DELETE p
-        """
         with graph.driver.session() as session:
-            session.run(query, limite_15d=limite_15d, limite_90d=limite_90d)
+            # 1. Apaga ofertas de terceiros (> 90 dias) e mensagens que as originaram
+            # Protege ofertas de inventário próprio Majesto ('self-offer:*')
+            q1 = """
+            MATCH (m:Mensagem)-[:ORIGINA]->(o:Oferta)
+            WHERE m.timestamp < $limite_90d AND NOT o.offer_id STARTS WITH 'self-offer:'
+            DETACH DELETE m, o
+            """
+            session.run(q1, limite_90d=limite_90d)
+
+            # 2. Apaga demandas de compradores (> 15 dias) e mensagens associadas
+            q2 = """
+            MATCH (m:Mensagem)-[:EXPRESSA]->(d:Demanda)
+            WHERE m.timestamp < $limite_15d
+            DETACH DELETE m, d
+            """
+            session.run(q2, limite_15d=limite_15d)
+
+            # 3. Apaga Imóveis de terceiros que não possuem nenhuma Oferta ativa
+            # Protege imóveis cadastrados do inventário Majesto (prefixo 'imovel_')
+            q3 = """
+            MATCH (i:Imovel)
+            WHERE NOT ()-[:REFERE_SE_A]->(i) AND NOT i.id STARTS WITH 'imovel_'
+            DETACH DELETE i
+            """
+            session.run(q3)
+
+            # 4. Apaga Pessoas órfãs (que não criaram Demanda nem publicaram Oferta ativa)
+            # Protege a entidade de sistema 'system:majesto'
+            q4 = """
+            MATCH (p:Pessoa)
+            WHERE NOT (p)-[:CRIOU]->() AND NOT (p)-[:PUBLICOU]->() AND p.person_id <> 'system:majesto'
+            DETACH DELETE p
+            """
+            session.run(q4)
+
         graph.close()
         print(f"[CLEANER] Neo4j: Expurgo concluído (Ofertas > 90d, Compradores > 15d, nós órfãos limpos).")
     except Exception as e:
@@ -58,19 +66,20 @@ def purge_old_data_neo4j(limite_15d: int, limite_90d: int):
 
 def purge_old_data_sql(limite_15d: int, limite_90d: int):
     """
-    Remove do PostgreSQL mensagens expiradas e oportunidades antigas para otimizar armazenamento.
+    Remove do PostgreSQL oportunidades antigas e mensagens expiradas para otimizar armazenamento.
+    Executa a deleção de opportunities antes de raw_messages para respeitar integridade referencial.
     """
     try:
         conn = get_db_connection()
         with conn:
             with conn.cursor() as cursor:
+                # Remove oportunidades criadas há mais de 15 dias primeiro
+                cursor.execute("DELETE FROM opportunities WHERE created_at < to_timestamp(%s)", (limite_15d,))
+                deleted_opps = cursor.rowcount
+
                 # Remove mensagens de terceiros mais antigas que 90 dias
                 cursor.execute("DELETE FROM raw_messages WHERE timestamp < %s", (limite_90d,))
                 deleted_msgs = cursor.rowcount
-
-                # Remove oportunidades criadas há mais de 15 dias
-                cursor.execute("DELETE FROM opportunities WHERE created_at < to_timestamp(%s)", (limite_15d,))
-                deleted_opps = cursor.rowcount
             conn.commit()
         print(f"[CLEANER] PostgreSQL: {deleted_msgs} mensagens antigas (>90d) e {deleted_opps} oportunidades (>15d) expurgadas.")
     except Exception as e:
