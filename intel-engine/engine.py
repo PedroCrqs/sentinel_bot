@@ -54,9 +54,9 @@ def process_message(message_id, publish_opportunity):
     # - Oportunidades de parceiros exigem score > 50; scores <= 50 são descartadas e logadas aqui no Engine.
     qualified_opportunities = []
     for opp in opportunities:
-        score = opp.get("score") or 0
+        score = opp.get("score")
         is_self = _is_self_opportunity(opp)
-        if not is_self and score <= MIN_MATCH_SCORE:
+        if score is not None and not is_self and score <= MIN_MATCH_SCORE:
             LOGGER.info(
                 "oportunidade de parceiro descartada por score insuficiente (score=%s <= %s): demand=%s offer=%s",
                 score,
