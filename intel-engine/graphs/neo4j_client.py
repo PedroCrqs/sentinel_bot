@@ -252,10 +252,11 @@ class GraphClient:
         WHERE d.status = 'ACTIVE'
           AND o.status = 'ACTIVE'
           AND comprador.person_id <> vendedor.person_id
-          // Preço é critério obrigatório: ambos devem possuir preço e a oferta deve caber no teto da demanda
+          // Preço é critério obrigatório: oferta não pode exceder a demanda e pode ser até 30% abaixo do teto
           AND d.price IS NOT NULL
           AND o.price IS NOT NULL
           AND o.price <= d.price
+          AND o.price >= (d.price * 0.70)
           AND (d.bedrooms IS NULL OR (i.quartos IS NOT NULL AND i.quartos >= d.bedrooms))
           AND (coalesce(d.seafront, false) = false OR i.frente_mar = true)
 
@@ -361,6 +362,7 @@ class GraphClient:
                             "price": {
                                 "demand_max": record["demand_price"],
                                 "offer_price": record["offer_price"],
+                                "price_floor_70pct": record["demand_price"] * 0.70 if record["demand_price"] else None,
                             },
                             "bedrooms": {
                                 "demand_min": record["demand_bedrooms"],

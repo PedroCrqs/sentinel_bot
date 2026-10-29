@@ -33,7 +33,7 @@ Based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 #### Changed
 
-- **Mandatory Price Compatibility in Matcher**: Location alone no longer qualifies an opportunity. Both demand and offer must specify a price, and offer price must be less than or equal to buyer budget (`o.price <= d.price`).
+- **Mandatory Price Compatibility in Matcher**: Location alone no longer qualifies an opportunity. Both demand and offer must specify a price, and the offer price must fall within a valid price window: it must not exceed the buyer budget **and** must be at least 70% of it (`d.price * 0.70 <= o.price <= d.price`). Offers priced more than 30% below the buyer's ceiling are rejected to avoid irrelevant low-budget matches.
 - **Strict Opportunity Qualification in Engine**: Partner opportunities are evaluated and filtered directly in `intel-engine/engine.py` (only matches with score strictly greater than 50, `score > 50`, are saved and published to RabbitMQ). Discarded opportunities are logged within the engine, maintaining `wpp-egress` purely focused on WhatsApp dispatch.
 - **Heavy Prioritization of Majesto Inventory**: Own properties from `public.imoveis` receive a +35 priority score bonus and route exclusively to priority private DM (`PRIORITY_CONTACT_ID`) with **no hourly rate limit**.
 - **Sanitized Numeric Types**: Converted PostgreSQL `decimal.Decimal` to `float` across adapters to prevent Bolt serialization exceptions.
@@ -66,7 +66,7 @@ Based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 #### Alterado
 
-- **Compatibilidade Obrigatória de Preço no Matcher**: Apenas o bairro compartilhado não gera mais oportunidades. É obrigatório que ambos os lados possuam preço e que a oferta caiba no orçamento do comprador (`o.price <= d.price`).
+- **Compatibilidade Obrigatória de Preço no Matcher**: Apenas o bairro compartilhado não gera mais oportunidades. É obrigatório que ambos os lados possuam preço e que a oferta esteja dentro da janela de preço válida: não pode exceder o orçamento do comprador **e** deve ser no mínimo 70% desse teto (`d.price * 0.70 <= o.price <= d.price`). Ofertas com preço mais de 30% abaixo do teto da demanda são descartadas para evitar matches irrelevantes.
 - **Qualificação Estrita de Oportunidades no Engine**: Oportunidades de parceiros passam por validação de score mínimo (`score > 50`) diretamente no `intel-engine/engine.py`. Oportunidades com pontuação insuficiente são descartadas e logadas no Engine, mantendo o `wpp-egress` desacoplado e focado exclusivamente no disparo para o WhatsApp.
 - **Super Prioridade para Inventário Majesto**: Imóveis próprios recebem +35 pontos de bônus no cálculo de score e são despachados diretamente na DM privada prioritária (`PRIORITY_CONTACT_ID`) **sem limite de envios por hora**. Matches de inventário ocorrem exclusivamente quando o imóvel está com status `DISPONIVEL` na tabela `public.imoveis`.
 - **Sanitização de Tipos Numéricos**: Conversão de `decimal.Decimal` do PostgreSQL para `float` em todos os adaptadores para compatibilidade com o protocolo Bolt.

@@ -68,7 +68,7 @@ O Sentinel Bot é composto por **4 serviços desacoplados**, orquestrados pelo *
 
 ### 1. Critérios de Compatibilidade (Cypher Match)
 - **Localização e Bairro**: O comprador e o imóvel devem compartilhar ao menos um bairro de interesse.
-- **Preço Obrigatório**: **É imprescindível que o preço bata**. Ambos os lados devem informar preço e `Oferta.price <= Demanda.price`. Mensagens sem preço ou fora do teto não geram oportunidade.
+- **Preço Obrigatório (Janela ±30%)**: **É imprescindível que o preço bata**. Ambos os lados devem informar preço e a oferta deve estar dentro da janela válida: `d.price * 0.70 <= o.price <= d.price`. Ofertas que excedem o teto do comprador ou que estão mais de 30% abaixo do teto são rejeitadas.
 - **Tipologia e Quartos**: Quartos devem atender ao mínimo da demanda (`Imovel.quartos >= Demanda.bedrooms`), caso informado.
 - **Frente Mar**: Se o comprador exigir frente mar, o imóvel obrigatoriamente deve possuir frente mar.
 
@@ -76,7 +76,7 @@ O Sentinel Bot é composto por **4 serviços desacoplados**, orquestrados pelo *
 | Critério | Pontuação | Descrição |
 |---|---|---|
 | **Base + Bairro** | **15 pts** | Localização compatível entre demanda e oferta |
-| **Preço Válido** | **20 pts** | Preço dentro do teto estipulado pelo comprador |
+| **Preço Válido** | **20 pts** | Preço dentro da janela válida: 70%–100% do teto do comprador |
 | **Inventário Majesto** | **+35 pts** | **Super prioridade** para imóveis próprios da base |
 | **Quartos** | **15 pts** | Quantidade de quartos compatível |
 | **Tipologia** | **10 pts** | Tipo de imóvel (Apartamento, Casa, Cobertura, etc.) |

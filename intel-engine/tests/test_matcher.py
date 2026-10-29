@@ -398,6 +398,51 @@ class DomainMatchingTests(unittest.TestCase):
 
         self.assertEqual(self.client.match_opportunities(), [])
 
+    def test_price_floor_70pct_is_present_in_match_details(self):
+        """price_floor_70pct must be computed as 70% of demand_max."""
+        self.driver.store["matching_records"] = [matching_record()]
+
+        opportunities = self.client.match_opportunities()
+
+        price_block = opportunities[0]["match_details"]["hard_constraints"]["price"]
+        self.assertIn("price_floor_70pct", price_block)
+        # demand_price in matching_record() is 800_000 → floor = 560_000
+        self.assertAlmostEqual(price_block["price_floor_70pct"], 800_000 * 0.70)
+
+    def test_price_floor_is_none_when_demand_price_is_none(self):
+        """price_floor_70pct must be None when demand_price is absent."""
+        record = matching_record()
+        record["demand_price"] = None
+        record["offer_price"] = None
+        self.driver.store["matching_records"] = [record]
+
+        opportunities = self.client.match_opportunities()
+
+        price_block = opportunities[0]["match_details"]["hard_constraints"]["price"]
+        self.assertIsNone(price_block["price_floor_70pct"])
+
+    def test_offer_at_exact_floor_is_a_valid_match(self):
+        """An offer priced exactly at 70% of demand_max must produce a match."""
+        record = matching_record()
+        demand_price = record["demand_price"]          # 800_000
+        record["offer_price"] = demand_price * 0.70   # 560_000 — exactly at the floor
+        self.driver.store["matching_records"] = [record]
+
+        opportunities = self.client.match_opportunities()
+
+        # The record is pre-filtered by Cypher; if returned by the fake session,
+        # the Python layer must not discard it.
+        self.assertEqual(len(opportunities), 1)
+        price_block = opportunities[0]["match_details"]["hard_constraints"]["price"]
+        self.assertAlmostEqual(price_block["offer_price"], demand_price * 0.70)
+
+    def test_cypher_query_enforces_price_floor(self):
+        """Cypher query must include the 70% price floor constraint."""
+        self.client.match_opportunities()
+        query = self.driver.sessions[-1].queries[0][0]
+        self.assertIn("d.price * 0.70", query)
+        self.assertIn("o.price >=", query)
+
 
 if __name__ == "__main__":
     unittest.main()
