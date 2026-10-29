@@ -34,7 +34,7 @@ const groupSentTimestamps = [];
 
 if (!GROUP_ID) {
   console.warn(
-    "⚠️ [CONFIG] GROUP_ID não configurado no .env. As mensagens para o grupo ficarão em espera."
+    "⚠️ [CONFIG] GROUP_ID não configurado no .env. Mensagens para o grupo ficarão retidas."
   );
 }
 
@@ -66,38 +66,13 @@ client.on("authenticated", () => {
   console.log("=".repeat(80));
 });
 
-client.once("ready", async () => {
+client.once("ready", () => {
   console.log("=".repeat(80));
   console.log("SENTINEL EGRESS RUNNING (RabbitMQ Worker v2.0.0)");
   console.log("=".repeat(80));
 
-  // Lista todos os chats e grupos para facilitar a captura de IDs
-  try {
-    const chats = await client.getChats();
-    const groups = chats.filter((c) => c.isGroup);
-    console.log(`📋 [CHATS DISPONÍVEIS] ${groups.length} grupo(s) encontrados na conta:`);
-    groups.forEach((g) => {
-      console.log(`   👉 Grupo: "${g.name}" | ID: ${g.id._serialized}`);
-    });
-  } catch (err) {
-    console.warn("[EGRESS] Não foi possível listar chats na inicialização:", err.message);
-  }
-
   // Inicia o consumidor do RabbitMQ
   startRabbitMQConsumer();
-});
-
-// Listener ao vivo: imprime o ID de qualquer chat que enviar mensagem
-client.on("message", async (message) => {
-  try {
-    const chat = await message.getChat();
-    const tipo = chat.isGroup ? "GRUPO" : "DM PRIVADA";
-    console.log(
-      `📌 [ID DETECTADO - ${tipo}] Nome: "${chat.name}" | ID: ${chat.id._serialized}`
-    );
-  } catch (err) {
-    // Silencioso
-  }
 });
 
 client.on("disconnected", (reason) => {
