@@ -91,16 +91,13 @@ client.on("auth_failure", (msg) => {
 // Identificador estrito de Imóvel Próprio vs Imóvel de Terceiro
 // ============================================================================
 function isSelfOpportunity(opp) {
-  if (opp.offer_id && String(opp.offer_id).startsWith("self-offer:")) {
-    return true;
-  }
-  if (
-    opp.seller &&
-    opp.seller.name &&
-    String(opp.seller.name).toLowerCase().includes("majesto")
-  ) {
-    return true;
-  }
+  if (!opp) return false;
+  if (opp.is_self === true) return true;
+  const offerId = String(opp.offer_id || opp.offerId || "");
+  if (offerId.startsWith("self-offer:")) return true;
+  const seller = opp.seller || {};
+  const sellerId = String(seller.person_id || seller.id || "");
+  if (sellerId === "system:majesto") return true;
   return false;
 }
 
@@ -198,12 +195,13 @@ async function checkAndApplyGroupRateLimit() {
   if (groupSentTimestamps.length >= MAX_GROUP_OPPS_PER_HOUR) {
     const oldestTimestamp = groupSentTimestamps[0];
     const waitTimeMs = ONE_HOUR_MS - (now - oldestTimestamp) + 1000;
+    const sleepTimeMs = Math.min(waitTimeMs, 15000);
     console.log(
       `⏳ [RATE LIMIT GRUPO] Limite de ${MAX_GROUP_OPPS_PER_HOUR} envios/hora atingido. Aguardando ${Math.ceil(
-        waitTimeMs / 1000
-      )}s para despachar o próximo...`
+        sleepTimeMs / 1000
+      )}s...`
     );
-    await new Promise((resolve) => setTimeout(resolve, waitTimeMs));
+    await new Promise((resolve) => setTimeout(resolve, sleepTimeMs));
     return checkAndApplyGroupRateLimit();
   }
 
@@ -216,6 +214,14 @@ async function checkAndApplyGroupRateLimit() {
 async function startRabbitMQConsumer() {
   try {
     const connection = await amqplib.connect(RABBITMQ_URL);
+    connection.on("close", (err) => {
+      console.error("❌ [RABBITMQ] Conexão com RabbitMQ fechada:", err);
+      process.exit(1);
+    });
+    connection.on("error", (err) => {
+      console.error("❌ [RABBITMQ] Erro na conexão RabbitMQ:", err);
+      process.exit(1);
+    });
     const channel = await connection.createChannel();
 
     await channel.assertQueue("opportunities_queue", { durable: true });
@@ -229,59 +235,67 @@ async function startRabbitMQConsumer() {
         const oppId = payload.opportunity_id;
 
         try {
-          // Busca os detalhes da oportunidade direto no banco
+          // Reserva atômica e leitura dos detalhes (SELECT match_details FROM opportunities WHERE opportunity_id = $1)
           const res = await pool.query(
-            "SELECT match_details FROM opportunities WHERE opportunity_id = $1",
+            "UPDATE opportunities SET dispatch_status = 'SENDING' WHERE opportunity_id = $1 AND dispatch_status = 'PENDING' RETURNING match_details",
             [oppId]
           );
 
-          if (res.rows.length > 0) {
-            const opp = res.rows[0].match_details;
-            const isSelf = isSelfOpportunity(opp);
-
-            let destination = "";
-            let logType = "";
-
-            if (isSelf) {
-              // Imóveis próprios Majesto: envio direto e prioritário na DM sem limite por hora
-              destination = PRIORITY_CONTACT_ID || GROUP_ID;
-              logType = "IMÓVEL PRÓPRIO MAJESTO (DM - SEM LIMITE)";
-            } else {
-              // Imóveis de parceiros (terceiros): vão para o grupo com limitador de taxa
-              await checkAndApplyGroupRateLimit();
-              destination = GROUP_ID;
-              logType = "PARCERIA/TERCEIRO (GRUPO)";
-            }
-
-            if (!destination) {
-              console.warn(
-                `⚠️ [EGRESS] Destinatário não configurado para ${logType}. Oportunidade ${oppId} não enviada.`
-              );
-              channel.ack(msg);
-              return;
-            }
-
-            // Enriquece e valida os telefones de comprador e vendedor
-            if (opp.buyer) {
-              opp.buyer.phone = await resolvePhoneIfLid(opp.buyer.phone, opp.buyer.raw_text);
-            }
-            if (opp.seller) {
-              opp.seller.phone = await resolvePhoneIfLid(opp.seller.phone, opp.seller.raw_text);
-            }
-
-            const wppMessage = format(opp, isSelf);
-            await client.sendMessage(destination, wppMessage);
-
-            console.log(
-              `✅ [EGRESS] Oportunidade ${oppId} [${logType}] enviada com sucesso para ${destination}!`
-            );
-
-            // Atualiza status no banco com os telefones enriquecidos
-            await pool.query(
-              "UPDATE opportunities SET dispatch_status = 'SENT', match_details = $1 WHERE opportunity_id = $2",
-              [opp, oppId]
-            );
+          if (res.rows.length === 0) {
+            // Oportunidade já enviada ou em processamento por outro canal
+            channel.ack(msg);
+            return;
           }
+
+          const opp = res.rows[0].match_details;
+          const isSelf = isSelfOpportunity(opp);
+
+          let destination = "";
+          let logType = "";
+
+          if (isSelf) {
+            // Imóveis próprios Majesto: envio direto e prioritário na DM sem limite por hora
+            destination = PRIORITY_CONTACT_ID || GROUP_ID;
+            logType = "IMÓVEL PRÓPRIO MAJESTO (DM - SEM LIMITE)";
+          } else {
+            // Imóveis de parceiros (terceiros): vão para o grupo com limitador de taxa
+            await checkAndApplyGroupRateLimit();
+            destination = GROUP_ID;
+            logType = "PARCERIA/TERCEIRO (GRUPO)";
+          }
+
+          if (!destination) {
+            console.warn(
+              `⚠️ [EGRESS] Destinatário não configurado para ${logType}. Oportunidade ${oppId} não enviada.`
+            );
+            await pool.query(
+              "UPDATE opportunities SET dispatch_status = 'FAILED' WHERE opportunity_id = $1",
+              [oppId]
+            );
+            channel.ack(msg);
+            return;
+          }
+
+          // Enriquece e valida os telefones de comprador e vendedor
+          if (opp.buyer) {
+            opp.buyer.phone = await resolvePhoneIfLid(opp.buyer.phone, opp.buyer.raw_text);
+          }
+          if (opp.seller) {
+            opp.seller.phone = await resolvePhoneIfLid(opp.seller.phone, opp.seller.raw_text);
+          }
+
+          const wppMessage = format(opp, isSelf);
+          await client.sendMessage(destination, wppMessage);
+
+          console.log(
+            `✅ [EGRESS] Oportunidade ${oppId} [${logType}] enviada com sucesso para ${destination}!`
+          );
+
+          // Atualiza status no banco com os telefones enriquecidos e status SENT
+          await pool.query(
+            "UPDATE opportunities SET dispatch_status = 'SENT', match_details = $1 WHERE opportunity_id = $2",
+            [opp, oppId]
+          );
 
           // Confirmação para RabbitMQ
           channel.ack(msg);
@@ -293,6 +307,12 @@ async function startRabbitMQConsumer() {
             `❌ [EGRESS ERRO] Falha ao enviar oportunidade ${oppId}:`,
             error.message
           );
+          try {
+            await pool.query(
+              "UPDATE opportunities SET dispatch_status = 'PENDING' WHERE opportunity_id = $1 AND dispatch_status = 'SENDING'",
+              [oppId]
+            );
+          } catch (_) {}
           channel.nack(msg, false, true);
         }
       }

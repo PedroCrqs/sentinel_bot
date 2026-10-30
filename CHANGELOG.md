@@ -53,6 +53,14 @@ Based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 #### Fixed
 
+- **Database Connection Pool Leak in Cleaner & Backfill (`cleaner.py`, `backfill_history.py`)**: `purge_old_data_sql` and `load_candidate_messages` acquired PostgreSQL connections from the pool but never released them via `release_db_connection()`. In long-running engine deployments, this exhausted the pool (`maxconn=10`) every ~54 hours and stalled all database lookups. Fixed by wrapping execution in `try...finally: release_db_connection(conn)`.
+- **False Self-Inventory Privilege Spoofing Prevention (`engine.py`, `wpp-egress/main.js`)**: Replaced loose pushname matching (`"majesto" in seller_name`) with strict identity verification (`offer_id.startswith("self-offer:")`, `opp["is_self"] = True`, or `seller_id == "system:majesto"`), preventing external third-party brokers with "Majesto" in their WhatsApp profile from spoofing internal inventory privileges.
+- **Atomic Opportunity Claim in Egress (`wpp-egress/main.js`)**: Implemented atomic reservation using `UPDATE opportunities SET dispatch_status = 'SENDING' WHERE opportunity_id = $1 AND dispatch_status = 'PENDING' RETURNING match_details` before dispatch, preventing duplicate message sends and race conditions.
+- **RabbitMQ Egress Consumer Timeout & Lifecycle Handling (`wpp-egress/main.js`)**: Capped continuous group rate limit sleeps to safe intervals and added connection `close`/`error` handlers exiting with code 1 for automated PM2 resurrection.
+- **Poison Message Infinite Loop Protection (`engine.py`)**: Added detection of deterministic errors and repeated failures (`method.redelivered`) on RabbitMQ consumption, discarding unprocessable messages without requeueing to prevent 100% CPU lockups.
+- **Inventory Node Protection & Purge User Integrity (`cleaner.py`, `purge_user.py`)**: Tagged inventory properties with `source = 'inventory'` in Neo4j and updated cleaner queries to protect them explicitly. Fixed `purge_user.py` to match `p.person_id`, cascade delete associated demands, offers, and opportunities, and release database connections.
+- **Repository Hygiene (`intel-engine/requirements.txt`)**: Converted `requirements.txt` from UTF-16 LE CRLF to standard UTF-8 LF.
+
 - **Price Normalization Flexibility without Currency Prefix (`normalizer.py`)**:
   - `extract_price()` previously strictly demanded literal `R$` symbols, failing on common broker patterns such as `"por 800k"`, `"até 800 mil"`, `"800k"`, `"1.8M"`, and formatted thousands (`800.000`).
   - Added multi-pattern price extractor supporting prefixes (`valor`, `preco`, `ate`, `por`, `teto`, `orcamento`), multipliers (`k`, `mil`, `mi`, `m`, `milhão`, `milhões`), and formatted dot-separated thousands (threshold >= 50,000).

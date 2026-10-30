@@ -13,7 +13,7 @@ import logging
 from classifier import run_classifier
 from normalizer import run_normalizer
 from graphs.neo4j_client import GraphClient
-from database import get_db_connection, update_message_status
+from database import get_db_connection, release_db_connection, update_message_status
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 LOGGER = logging.getLogger("backfill")
@@ -43,7 +43,7 @@ def load_candidate_messages() -> list[dict]:
         LOGGER.info("Carregadas %d mensagens dos últimos 90 dias do PostgreSQL.", len(rows))
         return rows
     finally:
-        conn.close()
+        release_db_connection(conn)
 
 
 def run_backfill():

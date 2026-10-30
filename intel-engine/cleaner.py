@@ -1,6 +1,6 @@
 import time
 from graphs.neo4j_client import GraphClient
-from database import get_db_connection
+from database import get_db_connection, release_db_connection
 
 # ==============================================================================
 # REGRAS DE RETENÇÃO E FAXINA (v2.0.0)
@@ -41,10 +41,12 @@ def purge_old_data_neo4j(limite_15d: int, limite_90d: int):
             session.run(q2, limite_15d=limite_15d)
 
             # 3. Apaga Imóveis de terceiros que não possuem nenhuma Oferta ativa
-            # Protege imóveis cadastrados do inventário Majesto (prefixo 'imovel_')
+            # Protege imóveis cadastrados do inventário Majesto (source='inventory' ou prefixo 'imovel_')
             q3 = """
             MATCH (i:Imovel)
-            WHERE NOT ()-[:REFERE_SE_A]->(i) AND NOT i.id STARTS WITH 'imovel_'
+            WHERE NOT ()-[:REFERE_SE_A]->(i) 
+              AND coalesce(i.source, '') <> 'inventory'
+              AND NOT toString(i.id) STARTS WITH 'imovel_'
             DETACH DELETE i
             """
             session.run(q3)
@@ -68,7 +70,9 @@ def purge_old_data_sql(limite_15d: int, limite_90d: int):
     """
     Remove do PostgreSQL oportunidades antigas e mensagens expiradas para otimizar armazenamento.
     Executa a deleção de opportunities antes de raw_messages para respeitar integridade referencial.
+    Libera a conexão de volta ao pool via release_db_connection para evitar connection pool starvation.
     """
+    conn = None
     try:
         conn = get_db_connection()
         with conn:
@@ -84,6 +88,9 @@ def purge_old_data_sql(limite_15d: int, limite_90d: int):
         print(f"[CLEANER] PostgreSQL: {deleted_msgs} mensagens antigas (>90d) e {deleted_opps} oportunidades (>15d) expurgadas.")
     except Exception as e:
         print(f"[CLEANER] Erro ao limpar PostgreSQL: {e}")
+    finally:
+        if conn:
+            release_db_connection(conn)
 
 
 def run_cleaner():

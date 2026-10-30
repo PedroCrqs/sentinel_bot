@@ -220,7 +220,8 @@ class GraphClient:
                 i.sol = $sol,
                 i.perto_praia = $perto_praia,
                 // preco é legado para o matcher atual; o preço canônico fica na Oferta.
-                i.preco = $preco
+                i.preco = $preco,
+                i.source = CASE WHEN $is_inventory THEN 'inventory' ELSE coalesce(i.source, 'third_party') END
             FOREACH (neighborhood IN $bairros |
                 MERGE (b:Bairro {nome: neighborhood})
                 MERGE (i)-[:LOCALIZADO_EM]->(b)
@@ -235,8 +236,10 @@ class GraphClient:
 
             """
 
+        is_inventory = (person_id == "system:majesto" or str(offer_id).startswith("self-offer:"))
         with self.driver.session() as session:
             session.run(query, 
+                is_inventory=is_inventory,
                 person_id=person_id,
                 telefone=author_phone,
                 nome=original.get("author_name", "Desconhecido"),

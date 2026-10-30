@@ -22,9 +22,14 @@ MIN_MATCH_SCORE = 50
 
 def _is_self_opportunity(opp: dict) -> bool:
     """Identifica se a oportunidade envolve imóvel próprio do inventário Majesto."""
+    if opp.get("is_self") is True:
+        return True
     offer_id = str(opp.get("offer_id") or "")
-    seller_name = str((opp.get("seller") or {}).get("name") or "").lower()
-    return offer_id.startswith("self-offer:") or "majesto" in seller_name
+    if offer_id.startswith("self-offer:"):
+        return True
+    seller = opp.get("seller") or {}
+    seller_id = str(seller.get("person_id") or seller.get("id") or "")
+    return seller_id == "system:majesto"
 
 
 def process_message(message_id, publish_opportunity):
@@ -56,6 +61,7 @@ def process_message(message_id, publish_opportunity):
     for opp in opportunities:
         score = opp.get("score")
         is_self = _is_self_opportunity(opp)
+        opp["is_self"] = is_self
         if score is not None and not is_self and score <= MIN_MATCH_SCORE:
             LOGGER.info(
                 "oportunidade de parceiro descartada por score insuficiente (score=%s <= %s): demand=%s offer=%s",
@@ -109,12 +115,21 @@ def on_message(ch, method, properties, body):
 
         process_message(msg_id, lambda opp_id: _publish_opportunity(ch, opp_id))
     except Exception as exc:
+        redelivered = getattr(method, "redelivered", False)
         LOGGER.error(
-            "message processing failed message_id=%s error=%s",
+            "message processing failed message_id=%s error=%s (redelivered=%s)",
             msg_id,
             type(exc).__name__,
+            redelivered,
         )
-        # Retryable at-least-once behavior; DLQ policy is a later task.
+        if redelivered:
+            LOGGER.critical(
+                "poison message detected message_id=%s after retry: descartando da fila para evitar loop infinito",
+                msg_id,
+            )
+            ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
+            return False
+
         ch.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
         return False
 
