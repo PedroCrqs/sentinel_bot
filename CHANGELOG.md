@@ -11,6 +11,19 @@ Based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 #### Added
 
+- **Automatic Phone Number Resolution and Extraction Pipeline**:
+  - `wpp-collector/ingest.js`: Automatically resolves real phone numbers for WhatsApp users when messages are received from privacy-shielded `@lid` identifiers by leveraging WhatsApp Web client `getContactLidAndPhone` retrieval.
+  - Regex-based phone extractor (`extractPhoneFromText`) supporting complete Brazilian phone formats (wa.me links, 11-digit mobile with DDD, 9-digit local, and landlines).
+  - `intel-engine/classifier.py` & `intel-engine/normalizer.py`: Recovers and assigns extracted phone numbers directly to `Message` and `NormalizedAd` entities when author phone is an opaque LID or unknown.
+  - `intel-engine/graphs/neo4j_client.py`: Enriches and persists verified phone numbers into `(p:Pessoa).telefone`.
+  - `wpp-egress/main.js`: Formats phone numbers cleanly (`+55 (DD) 9XXXX-XXXX`) and generates direct clickable WhatsApp links (`https://wa.me/55...`), with proactive fallback LID resolution.
+- **Owned Property Owner Contact Propagation (`database.py`, `inventory_adapter.py`, `inventory_sync.py`)**:
+  - `public.proprietarios` integration: `get_available_properties()` and `get_inventory_snapshot()` now join with `public.proprietarios` to propagate `proprietario_nome` and `proprietario_telefone` into Majesto inventory offers.
+  - Fixes missing seller phone numbers on self-owned property opportunity dispatches.
+- **Entities Knowledge Base Expansion (`entities.json`)**:
+  - Added 50 canonical neighborhoods and 224 condominiums/ventures mapped from `public.bairros`, `public.condominios` and historical `raw_messages`.
+  - Expanded `NEIGHBORHOOD_PARENT` from 4 to 169 mappings linking all known condominiums and sub-neighborhoods to their canonical parent neighborhoods.
+
 - **Event-Driven Architecture (EDA) with RabbitMQ**:
   - `wpp-collector/rabbitmq.js`: Publishes raw message events to `raw_messages` queue immediately upon persisting to PostgreSQL.
   - `intel-engine/engine.py`: Event-driven consumer using `pika` with `basic_qos(prefetch_count=1)` (fair dispatch).
@@ -40,6 +53,13 @@ Based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 #### Fixed
 
+- **Price Normalization Flexibility without Currency Prefix (`normalizer.py`)**:
+  - `extract_price()` previously strictly demanded literal `R$` symbols, failing on common broker patterns such as `"por 800k"`, `"até 800 mil"`, `"800k"`, `"1.8M"`, and formatted thousands (`800.000`).
+  - Added multi-pattern price extractor supporting prefixes (`valor`, `preco`, `ate`, `por`, `teto`, `orcamento`), multipliers (`k`, `mil`, `mi`, `m`, `milhão`, `milhões`), and formatted dot-separated thousands (threshold >= 50,000).
+- **Condominium Neighborhood Masking and Locality Resolution (`normalizer.py`)**:
+  - Resolves condominiums directly to their parent canonical neighborhoods (e.g., `"maayan"` -> `["BARRA OLIMPICA", "BARRA"]`, `"peninsula"` -> `["BARRA"]`, `"barra sunday"` -> `["RECREIO"]`) before masking to prevent empty neighborhood lists (`neighborhood: []`) and unmatchable `DESCONHECIDO` graph projections.
+  - Implemented dual-affiliation mapping for Maayan and Cidade Jardim across Barra Olímpica and Barra da Tijuca.
+
 - **Canonical Neighborhood Taxonomy & Alias Mapping (`normalizer.py`, `inventory_sync.py`, `graphs/neo4j_client.py`)**: The NLP normalizer mapped WhatsApp demand messages to canonical alias tokens (`"Barra da Tijuca"` -> `"BARRA"`, `"Recreio dos Bandeirantes"` -> `"RECREIO"`, `"Barra Olímpica"` -> `"BARRA OLIMPICA"`), whereas the PostgreSQL inventory projection (`bairros.nome`) was creating distinct nodes with the raw database names (`"BARRA DA TIJUCA"`, `"RECREIO DOS BANDEIRANTES"`, `"BARRA OLÍMPICA"`). This disjoint taxonomy caused 85% of the Majesto inventory to have zero spatial overlap with incoming broker demands, completely preventing matches. Fixed by adding `canonical_neighborhood()` and `_normalize_neighborhood()` across the projection pipeline, and migrating existing Neo4j edges to unified canonical `Bairro` nodes.
 - **Semantic Feature Extraction from Property Description (`inventory_sync.py`)**: Previously, `property_to_inventory_ad()` left `seafront=None`, `nearbeach=False`, and `condominium=False`, ignoring the property description. In addition, when buyers required seafront properties (`d.seafront = true`), the matcher strictly rejected inventory properties. Now, `NormalizedAd` extracts `seafront` (e.g. "frontal mar", "frente mar"), `nearbeach`, `condominium`, and normalized solar orientation (`sun_type`) directly from `public.imoveis.descricao`, properly scoring and qualifying inventory opportunities.
 - **PostgreSQL Constraint Relaxation on `opportunities.seller_message_id` (`migrations/004_relax_opportunity_seller_message_reference.sql`)**: Relaxes foreign key `opportunities_seller_message_id_fkey` on `raw_messages`. Owned inventory offers use synthetic `seller_message_id` (`self-<property_id>`) that do not exist in WhatsApp raw messages; the previous FK caused `ForeignKeyViolation` exceptions whenever a Majesto match was inserted, creating endless message retry loops in RabbitMQ.
@@ -51,6 +71,19 @@ Based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### Português
 
 #### Adicionado
+
+- **Pipeline de Resolução e Extração Automática de Telefones**:
+  - `wpp-collector/ingest.js`: Resolução automática de números reais de telefone quando a mensagem é originada de identificadores ocultos `@lid`, utilizando `getContactLidAndPhone` do cliente WhatsApp Web.
+  - Extrator regex inteligente (`extractPhoneFromText`) com suporte completo aos formatos brasileiros (links wa.me, celulares com DDD de 11 dígitos, locais de 9 dígitos e telefones fixos).
+  - `intel-engine/classifier.py` e `intel-engine/normalizer.py`: Recuperação e injeção automática de números extraídos do texto nas entidades `Message` e `NormalizedAd` quando o telefone do autor for um LID.
+  - `intel-engine/graphs/neo4j_client.py`: Enriquecimento e persistência no nó `(p:Pessoa).telefone`.
+  - `wpp-egress/main.js`: Formatação padronizada de telefones (`+55 (DD) 9XXXX-XXXX`) e geração automática de links clicáveis do WhatsApp (`https://wa.me/55...`), com resolução reativa de LIDs.
+- **Propagação do Contato de Proprietários do Inventário Próprio (`database.py`, `inventory_adapter.py`, `inventory_sync.py`)**:
+  - Integração com `public.proprietarios`: `get_available_properties()` e `get_inventory_snapshot()` realizam `LEFT JOIN` com `public.proprietarios` para carregar `proprietario_nome` e `proprietario_telefone` nas ofertas do inventário próprio.
+  - Garante que oportunidades de imóveis próprios Majesto cheguem acompanhadas do telefone de contato do proprietário.
+- **Expansão da Base de Entidades Imobiliárias (`entities.json`)**:
+  - Inclusão de 50 bairros canônicos e 224 condomínios/empreendimentos mapeados a partir de `public.bairros`, `public.condominios` e mensagens históricas de `raw_messages`.
+  - Expansão de `NEIGHBORHOOD_PARENT` de 4 para 169 mapeamentos associando todos os condomínios aos seus respectivos bairros canônicos.
 
 - **Arquitetura Orientada a Eventos (EDA) via RabbitMQ**:
   - `wpp-collector/rabbitmq.js`: Publica eventos na fila `raw_messages` imediatamente após persistir no PostgreSQL.
@@ -80,6 +113,13 @@ Based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **Sanitização de Tipos Numéricos**: Conversão de `decimal.Decimal` do PostgreSQL para `float` em todos os adaptadores para compatibilidade com o protocolo Bolt.
 
 #### Corrigido
+
+- **Flexibilização na Normalização de Preços sem Prefixo Monetário (`normalizer.py`)**:
+  - O método `extract_price()` exigia a presença explícita do símbolo `R$`, falhando em mensagens como `"por 800k"`, `"até 800 mil"`, `"800k"`, `"1.8M"` e valores numéricos formatados (`800.000`).
+  - Implementado extrator multi-padrão com suporte a prefixos operacionais (`valor`, `preco`, `ate`, `por`, `teto`, `orcamento`), multiplicadores (`k`, `mil`, `mi`, `m`, `milhão`, `milhões`) e milhares pontuados com piso mínimo de R$ 50.000,00.
+- **Resolução de Bairros Pai para Condomínios e Correção de Máscara (`normalizer.py`)**:
+  - O mascaramento anterior de condomínios (`XXXXXX`) apagava menções a condomínios isolados, deixando `neighborhood: []` e projetando demandas no bairro `"DESCONHECIDO"`, impedindo matches.
+  - Nova estratégia resolve primeiro o condomínio para seu bairro pai canônico (ex: `"maayan"` -> `["BARRA OLIMPICA", "BARRA"]`, `"peninsula"` -> `["BARRA"]`, `"barra sunday"` -> `["RECREIO"]`), permitindo matching perfeito com imóveis do inventário.
 
 - **Taxonomia Canônica de Bairros & Mapeamento de Aliases (`normalizer.py`, `inventory_sync.py`, `graphs/neo4j_client.py`)**: O normalizador de PLN mapeava pedidos de corretores do WhatsApp para aliases canônicos (`"Barra da Tijuca"` -> `"BARRA"`, `"Recreio dos Bandeirantes"` -> `"RECREIO"`, `"Barra Olímpica"` -> `"BARRA OLIMPICA"`), enquanto a projeção do inventário do PostgreSQL (`bairros.nome`) criava nós com a grafia literal (`"BARRA DA TIJUCA"`, `"RECREIO DOS BANDEIRANTES"`, `"BARRA OLÍMPICA"` com acento). Essa divergência taxonômica isolava 85% do inventário Majesto, impedindo qualquer cruzamento no grafo. Corrigido com a introdução de `canonical_neighborhood()` e `_normalize_neighborhood()` em todo o pipeline, além de unificação retroativa dos nós no Neo4j.
 - **Extração de Características Semânticas da Coluna Descrição (`inventory_sync.py`)**: Anteriormente, `property_to_inventory_ad()` não extraía informações da coluna `descricao`, fixando `seafront=None`, `nearbeach=False` e `condominium=False`. Quando um corretor exigia frente mar (`d.seafront = true`), os imóveis da base eram sumariamente descartados. Agora, o `NormalizedAd` extrai frente mar ("frontal mar", "frente mar"), proximidade da praia, condomínio e posição solar normalizada diretamente de `public.imoveis.descricao`.

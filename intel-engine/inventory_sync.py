@@ -76,11 +76,20 @@ def property_to_inventory_ad(property_data: dict) -> dict:
     raw_neighborhood = property_data.get("neighborhood") or ""
     canon_neighborhood = canonical_neighborhood(raw_neighborhood)
 
-    # Lista de bairros: canônico como primário, complementado com sub-bairros da descrição
+    # Lista de bairros: canônico como primário, complementado exclusivamente com sub-bairros compatíveis
+    # Imóveis da base Majesto têm a tabela public.imoveis como autoridade máxima de localização.
+    # Um imóvel da BARRA jamais pode receber RECREIO, e vice-versa.
+    CONFLICTING_ZONES = {
+        "BARRA": {"RECREIO", "COPACABANA", "IPANEMA", "LEBLON", "BOTAFOGO", "FLAMENGO", "TIJUCA", "GRAJAÚ", "MEIER"},
+        "RECREIO": {"BARRA", "COPACABANA", "IPANEMA", "LEBLON", "BOTAFOGO", "FLAMENGO", "TIJUCA", "GRAJAÚ", "MEIER"},
+    }
+
     neighborhoods = [canon_neighborhood]
+    conflicts = CONFLICTING_ZONES.get(canon_neighborhood, set())
     for n in extra_neighborhoods:
         if n and n != canon_neighborhood and n not in neighborhoods:
-            neighborhoods.append(n)
+            if n not in conflicts:
+                neighborhoods.append(n)
 
     # Posição solar: normalizada para MANHA, TARDE, PASSANTE
     raw_sun = property_data.get("sun_type") or nlp_sun
@@ -91,6 +100,7 @@ def property_to_inventory_ad(property_data: dict) -> dict:
             "author_name": "Majesto (Imóvel Próprio)",
             "author_id": "system:majesto",
             "author_phone": None,
+            "property_description": description,
             "message_id": f"self-{property_id}",
             "timestamp": int(time.time()),
             "imovel_id": property_id,

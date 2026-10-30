@@ -39,9 +39,11 @@ def get_available_properties() -> list[dict]:
     query = """
         SELECT i.imovelid, i.tipologia, i.quartos, i.vagas, i.valor,
                i.metragem, i.sol, i.bairroid, i.imovelstatus,
-               i.descricao, i.datacadastro, b.nome AS bairro_nome
+               i.descricao, i.datacadastro, b.nome AS bairro_nome,
+               p.nome AS proprietario_nome, p.telefone AS proprietario_telefone
         FROM public.imoveis AS i
         LEFT JOIN public.bairros AS b ON b.bairroid = i.bairroid
+        LEFT JOIN public.proprietarios AS p ON p.proprietarioid = i.proprietarioid
         WHERE i.imovelstatus = %s
     """
     conn = None
@@ -73,9 +75,11 @@ def get_inventory_snapshot() -> list[dict]:
     query = """
         SELECT i.imovelid, i.tipologia, i.quartos, i.vagas, i.valor,
                i.metragem, i.sol, i.bairroid, i.imovelstatus,
-               i.descricao, i.datacadastro, b.nome AS bairro_nome
+               i.descricao, i.datacadastro, b.nome AS bairro_nome,
+               p.nome AS proprietario_nome, p.telefone AS proprietario_telefone
         FROM public.imoveis AS i
         LEFT JOIN public.bairros AS b ON b.bairroid = i.bairroid
+        LEFT JOIN public.proprietarios AS p ON p.proprietarioid = i.proprietarioid
     """
     conn = None
     try:

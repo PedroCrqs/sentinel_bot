@@ -89,11 +89,6 @@ client.on("auth_failure", (msg) => {
 
 // ============================================================================
 // Identificador estrito de Imóvel Próprio vs Imóvel de Terceiro
-//
-// Imóveis próprios vêm da tabela Imoveis (public.imoveis) e recebem:
-//   - offer_id iniciado com "self-offer:"
-//   - seller.name contendo "Majesto"
-// Anúncios de terceiros coletados do WhatsApp NÃO possuem esse prefixo.
 // ============================================================================
 function isSelfOpportunity(opp) {
   if (opp.offer_id && String(opp.offer_id).startsWith("self-offer:")) {
@@ -107,6 +102,81 @@ function isSelfOpportunity(opp) {
     return true;
   }
   return false;
+}
+
+// ============================================================================
+// Formatação e Resolução de Números de Telefone
+// ============================================================================
+function formatPhoneNumber(phone) {
+  if (!phone) return "Não informado";
+  const digits = String(phone).replace(/\D/g, "");
+  // Celular brasileiro completo com DDI: 5521999998888 (13 dígitos)
+  if (digits.length === 13 && digits.startsWith("55")) {
+    const ddd = digits.slice(2, 4);
+    const p1 = digits.slice(4, 9);
+    const p2 = digits.slice(9);
+    return `+55 (${ddd}) ${p1}-${p2}`;
+  }
+  // Celular brasileiro com DDD: 21999998888 (11 dígitos)
+  if (digits.length === 11) {
+    const ddd = digits.slice(0, 2);
+    const p1 = digits.slice(2, 7);
+    const p2 = digits.slice(7);
+    return `+55 (${ddd}) ${p1}-${p2}`;
+  }
+  // Fixo brasileiro com DDI: 552133334444 (12 dígitos)
+  if (digits.length === 12 && digits.startsWith("55")) {
+    const ddd = digits.slice(2, 4);
+    const p1 = digits.slice(4, 8);
+    const p2 = digits.slice(8);
+    return `+55 (${ddd}) ${p1}-${p2}`;
+  }
+  // Se for LID não resolvido
+  if (String(phone).includes("@lid") || digits.length > 13) {
+    return `${phone} (ID WhatsApp)`;
+  }
+  return phone;
+}
+
+function getWhatsAppLink(phone) {
+  if (!phone) return null;
+  const digits = String(phone).replace(/\D/g, "");
+  if (digits.length >= 10 && digits.length <= 13) {
+    const full = digits.startsWith("55") ? digits : `55${digits}`;
+    return `https://wa.me/${full}`;
+  }
+  return null;
+}
+
+async function resolvePhoneIfLid(phone, rawText) {
+  // Se já for um telefone convencional
+  if (phone && !String(phone).includes("@lid")) {
+    const d = String(phone).replace(/\D/g, "");
+    if (d.length >= 10 && d.length <= 13) return phone;
+  }
+  // Tenta extrair do texto original
+  if (rawText) {
+    const m = rawText.match(/(?:\+?55\s?)?(?:\(?([1-9]{2})\)?\s?)?(?:9\s?\d{4})[-\s]?(\d{4})\b/);
+    if (m) {
+      const d = m[0].replace(/\D/g, "");
+      if (d.length === 9) return `5521${d}`;
+      if (d.length === 11) return `55${d}`;
+      if (d.length === 13) return d;
+    }
+  }
+  // Tenta resolver via WhatsApp Web caso seja LID
+  if (phone && client) {
+    const lidId = String(phone).includes("@") ? String(phone) : `${phone}@lid`;
+    try {
+      if (typeof client.getContactLidAndPhone === "function") {
+        const res = await client.getContactLidAndPhone(lidId);
+        if (res && res[0] && res[0].pn) {
+          return res[0].pn.split("@")[0];
+        }
+      }
+    } catch (_) {}
+  }
+  return phone;
 }
 
 // ============================================================================
@@ -191,6 +261,14 @@ async function startRabbitMQConsumer() {
               return;
             }
 
+            // Enriquece e valida os telefones de comprador e vendedor
+            if (opp.buyer) {
+              opp.buyer.phone = await resolvePhoneIfLid(opp.buyer.phone, opp.buyer.raw_text);
+            }
+            if (opp.seller) {
+              opp.seller.phone = await resolvePhoneIfLid(opp.seller.phone, opp.seller.raw_text);
+            }
+
             const wppMessage = format(opp, isSelf);
             await client.sendMessage(destination, wppMessage);
 
@@ -198,10 +276,10 @@ async function startRabbitMQConsumer() {
               `✅ [EGRESS] Oportunidade ${oppId} [${logType}] enviada com sucesso para ${destination}!`
             );
 
-            // Atualiza status no banco
+            // Atualiza status no banco com os telefones enriquecidos
             await pool.query(
-              "UPDATE opportunities SET dispatch_status = 'SENT' WHERE opportunity_id = $1",
-              [oppId]
+              "UPDATE opportunities SET dispatch_status = 'SENT', match_details = $1 WHERE opportunity_id = $2",
+              [opp, oppId]
             );
           }
 
@@ -235,21 +313,34 @@ function format(o, isSelf) {
   let message = `${header} | Score: ${o.score || 0}\n`;
   message += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n`;
 
+  const buyerPhoneFormatted = formatPhoneNumber(buyer.phone);
+  const buyerWaLink = getWhatsAppLink(buyer.phone);
+
   message += `👤 *COMPRADOR*\n`;
   message += `Nome: ${buyer.name || "Não informado"}\n`;
-  message += `Telefone: ${buyer.phone || "Não informado"}\n`;
+  message += `Telefone: ${buyerPhoneFormatted}\n`;
+  if (buyerWaLink) {
+    message += `WhatsApp: ${buyerWaLink}\n`;
+  }
   message += `\nTexto original:\n_${buyer.raw_text || "Sem texto"}_\n`;
 
   message += `\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n`;
 
-  const sellerLabel = isSelf
-    ? "🏢 *VENDEDOR (INVENTÁRIO PRÓPRIO MAJESTO)*"
-    : "🏢 *VENDEDOR (PARCEIRO)*";
-
-  message += `${sellerLabel}\n`;
-  message += `Nome: ${seller.name || "Não informado"}\n`;
-  message += `Telefone: ${seller.phone || "Não informado"}\n`;
-  message += `\nTexto original:\n_${seller.raw_text || "Sem texto"}_`;
+  if (isSelf) {
+    message += `🏢 *VENDEDOR (INVENTÁRIO PRÓPRIO MAJESTO)*\n`;
+    message += `Nome: Majesto (Imóvel Próprio)\n`;
+    message += `Telefone: Base de Imóveis Majesto (Opção Direta)\n`;
+    message += `\nTexto original:\n_${seller.raw_text || "Sem texto"}_`;
+  } else {
+    message += `🏢 *VENDEDOR (PARCEIRO)*\n`;
+    message += `Nome: ${seller.name || "Não informado"}\n`;
+    message += `Telefone: ${formatPhoneNumber(seller.phone)}\n`;
+    const sellerWaLink = getWhatsAppLink(seller.phone);
+    if (sellerWaLink) {
+      message += `WhatsApp: ${sellerWaLink}\n`;
+    }
+    message += `\nTexto original:\n_${seller.raw_text || "Sem texto"}_`;
+  }
 
   return message;
 }

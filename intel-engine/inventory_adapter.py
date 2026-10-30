@@ -69,4 +69,6 @@ def map_inventory_row(row: dict) -> dict:
         "status": _normalize_status(row.get("imovelstatus")),
         "description": row.get("descricao"),
         "created_at": row.get("datacadastro"),
+        "owner_name": row.get("proprietario_nome"),
+        "owner_phone": row.get("proprietario_telefone"),
     }

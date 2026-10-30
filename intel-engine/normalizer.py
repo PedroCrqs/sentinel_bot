@@ -34,6 +34,45 @@ def remove_accents_str(text: str) -> str:
         if unicodedata.category(c) != "Mn"
     )
 
+def extract_phone_from_text(text: str) -> str | None:
+    if not text:
+        return None
+    m_wame = re.search(r"wa\.me/(?:55)?([1-9]{2}9?\d{8})", text, re.I)
+    if m_wame:
+        d = m_wame.group(1)
+        return f"55{d}" if len(d) == 11 else d
+    m_cell = re.search(r"(?:\+?55\s?)?(?:\(?([1-9]{2})\)?\s?)?(?:9\s?\d{4})[-\s]?(\d{4})\b", text)
+    if m_cell:
+        digits = re.sub(r"\D", "", m_cell.group(0))
+        if len(digits) == 9:
+            return f"5521{digits}"
+        elif len(digits) == 11:
+            return f"55{digits}"
+        elif len(digits) == 13:
+            return digits
+    m_land = re.search(r"(?:\+?55\s?)?(?:\(?([1-9]{2})\)?\s?)?(?:[2-5]\d{3})[-\s]?(\d{4})\b", text)
+    if m_land:
+        digits = re.sub(r"\D", "", m_land.group(0))
+        if len(digits) == 8:
+            return f"5521{digits}"
+        elif len(digits) == 10:
+            return f"55{digits}"
+        elif len(digits) == 12:
+            return digits
+    return None
+def is_lid(phone_val) -> bool:
+    """Verifica se o valor de telefone é nulo, inválido ou um identificador LID do WhatsApp."""
+    if not phone_val:
+        return True
+    s = str(phone_val).strip()
+    if "@lid" in s or s.lower() in {"desconhecido", "none", "null", ""}:
+        return True
+    digits = re.sub(r"\D", "", s)
+    if len(digits) > 13 or len(digits) < 10:
+        return True
+    return False
+
+
 
 def canonical_neighborhood(raw_name: str) -> str:
     """Retorna o nome canônico do bairro para o grafo Neo4j.
@@ -107,6 +146,14 @@ class NormalizedAd:
         self.zone = None
         self.sub_neighborhood = None
 
+        # Enriquece telefone do autor caso seja um LID ou esteja vazio
+        if self.original_content:
+            curr_phone = self.original_content.get("author_phone")
+            if is_lid(curr_phone):
+                extracted_p = extract_phone_from_text(raw_text)
+                if extracted_p:
+                    self.original_content["author_phone"] = extracted_p
+
     def _normalize_text(self, text: str) -> str:
         text = text.lower()
         text = re.sub(r"\s+", " ", text)
@@ -140,6 +187,17 @@ class NormalizedAd:
 
         lines = text.splitlines()
 
+        multipliers = {
+            "milhões": 1_000_000,
+            "milhoes": 1_000_000,
+            "milhão": 1_000_000,
+            "milhao": 1_000_000,
+            "mi": 1_000_000,
+            "m": 1_000_000,
+            "mil": 1_000,
+            "k": 1_000,
+        }
+
         for i, line in enumerate(lines):
             if any(word in line for word in forbidden_context):
                 continue
@@ -149,41 +207,45 @@ class NormalizedAd:
                 if any(word in prev_line for word in forbidden_context):
                     continue
 
-            matches = re.findall(
-                r"r\$\s*([\d\.,]+)\s*(milh[oõ]es|milh[aã]o|mil|mi|k)?", line
-            )
-            for m in matches:
-                num_str, suffix = m
-                try:
-                    if "," in num_str and "." in num_str:
-                        value = num_str.replace(".", "").replace(",", ".")
-                    elif "," in num_str:
-                        value = num_str.replace(",", ".")
-                    elif num_str.count(".") > 1:
-                        value = num_str.replace(".", "")
-                    elif "." in num_str and suffix:
-                        value = num_str
-                    elif "." in num_str and not suffix:
-                        value = num_str.replace(".", "")
-                    else:
-                        value = num_str
+            patterns = [
+                # Precedido por R$ ou palavras-chave (valor, ate, por, teto, etc)
+                r"(?:r\$\s*|valor:?\s*|preco:?\s*|preço:?\s*|at[eé]:?\s*|por\s+|teto:?\s*|or[cç]amento:?\s*|m[aá]ximo:?\s*)([\d\.,]+)\s*(milh[oõ]es|milh[aã]o|mil|mi|m|k)?\b",
+                # Sufixos explícitos independentes: 800k, 800 mil, 1.8mi, 1.8m
+                r"\b([\d\.,]+)\s*(milh[oõ]es|milh[aã]o|mil|mi|m|k)\b",
+                # Notação monetária tradicional
+                r"r\$\s*([\d\.,]+)\b",
+                # Valores numéricos no formato de milhares (ex: 800.000)
+                r"\b(\d{1,3}(?:\.\d{3})+(?:,\d{2})?)\b",
+            ]
 
-                    base = float(value)
+            for pat in patterns:
+                for m in re.finditer(pat, line, re.I):
+                    groups = m.groups()
+                    num_str = groups[0]
+                    suffix = (groups[1].lower() if len(groups) > 1 and groups[1] else "").strip()
+                    try:
+                        if "," in num_str and "." in num_str:
+                            value = num_str.replace(".", "").replace(",", ".")
+                        elif "," in num_str:
+                            value = num_str.replace(",", ".")
+                        elif num_str.count(".") > 1:
+                            value = num_str.replace(".", "")
+                        elif "." in num_str and suffix:
+                            value = num_str
+                        elif "." in num_str and not suffix:
+                            value = num_str.replace(".", "")
+                        else:
+                            value = num_str
 
-                    multipliers = {
-                        "milhões": 1_000_000,
-                        "milhoes": 1_000_000,
-                        "milhão": 1_000_000,
-                        "milhao": 1_000_000,
-                        "mi": 1_000_000,
-                        "mil": 1_000,
-                        "k": 1_000,
-                    }
+                        base = float(value)
+                        multiplier = multipliers.get(suffix, 1)
+                        val = int(base * multiplier)
 
-                    multiplier = multipliers.get(suffix, 1)
-                    prices.append(int(base * multiplier))
-                except ValueError:
-                    continue
+                        # Valores de imóveis devem ser de pelo menos 50 mil reais
+                        if val >= 50_000:
+                            prices.append(val)
+                    except ValueError:
+                        continue
 
         if not prices:
             self.price = None
@@ -334,59 +396,57 @@ class NormalizedAd:
         return remove_accents_str(text)
 
     def extract_neighborhood(self):
-        masked_accented = self.text
-        masked_no_accent = self._remove_accents(self.text)
-
-        for cond in sorted(CONDOMINIUM, key=len, reverse=True):
-            cond_accented = cond.lower()
-            cond_no_accent = self._remove_accents(cond_accented)
-
-            if cond_accented in masked_accented:
-                masked_accented = masked_accented.replace(
-                    cond_accented, "X" * len(cond)
-                )
-            if cond_no_accent in masked_no_accent:
-                masked_no_accent = masked_no_accent.replace(
-                    cond_no_accent, "X" * len(cond)
-                )
-
-        text_accented = masked_accented
-        text_no_accent = masked_no_accent
-
-        all_places = sorted(
-            NEIGHBORHOODS + SUB_NEIGHBORHOODS, key=len, reverse=True
-        )
+        text_accented = self.text
+        text_no_accent = self._remove_accents(self.text)
 
         found = set()
         matched_strings = []
 
-        for bairro in all_places:
-            bairro_no_accent = self._remove_accents(bairro)
+        # 1. Primeiro verifica sub-bairros e condomínios com mapeamento de bairro pai (NEIGHBORHOOD_PARENT)
+        for place, parent in sorted(NEIGHBORHOOD_PARENT.items(), key=lambda x: len(x[0]), reverse=True):
+            place_no_acc = self._remove_accents(place.lower())
+            pattern = r"\b" + re.escape(place_no_acc) + r"\b"
+            if re.search(pattern, text_no_accent):
+                canonical = NEIGHBORHOOD_ALIASES.get(place, place.upper())
+                found.add(canonical)
+                if isinstance(parent, list):
+                    for p in parent:
+                        found.add(p)
+                else:
+                    found.add(parent)
 
-            in_text = (bairro in text_accented) or (bairro_no_accent in text_no_accent)
+                # Vinculação dual histórica de Maayan / Cidade Jardim em Barra Olímpica e Barra da Tijuca
+                if place_no_acc in {"maayan", "cidade jardim"}:
+                    found.add("BARRA")
+                    found.add("BARRA OLIMPICA")
 
-            if not in_text:
-                continue
-
-            contained_in_matched = any(
-                bairro in longer
-                or (
-                    bairro_no_accent in self._remove_accents(longer)
-                    and longer not in NEIGHBORHOOD_PARENT
-                )
-                for longer in matched_strings
-            )
-            if contained_in_matched:
-                continue
-
-            matched_strings.append(bairro)
-            canonical = NEIGHBORHOOD_ALIASES.get(bairro, bairro.upper())
-            found.add(canonical)
-
-            parent = NEIGHBORHOOD_PARENT.get(bairro)
-            if parent:
-                found.add(parent)
                 self.sub_neighborhood = canonical
+                matched_strings.append(place)
+                # Mascara este termo para que substrings não acionem bairros gerais incorretos (ex: Barra em Barra Sunday)
+                text_no_accent = re.sub(pattern, " " * len(place_no_acc), text_no_accent)
+                text_accented = re.sub(r"\b" + re.escape(place.lower()) + r"\b", " " * len(place), text_accented)
+
+        # 2. Mascara outros condomínios conhecidos para evitar falsos positivos nos bairros
+        for cond in sorted(CONDOMINIUM, key=len, reverse=True):
+            cond_accented = cond.lower()
+            cond_no_accent = self._remove_accents(cond_accented)
+            pattern_no_acc = r"\b" + re.escape(cond_no_accent) + r"\b"
+            if re.search(pattern_no_acc, text_no_accent):
+                canonical = cond.upper()
+                found.add(canonical)
+                text_no_accent = re.sub(pattern_no_acc, " " * len(cond_no_accent), text_no_accent)
+                text_accented = re.sub(r"\b" + re.escape(cond_accented) + r"\b", " " * len(cond), text_accented)
+
+        # 3. Mapeia bairros conhecidos no restante do texto
+        for bairro in sorted(NEIGHBORHOODS, key=len, reverse=True):
+            bairro_no_accent = self._remove_accents(bairro)
+            pattern = r"\b" + re.escape(bairro_no_accent) + r"\b"
+
+            if re.search(pattern, text_no_accent):
+                canonical = NEIGHBORHOOD_ALIASES.get(bairro, bairro.upper())
+                found.add(canonical)
+                matched_strings.append(bairro)
+                text_no_accent = re.sub(pattern, " " * len(bairro_no_accent), text_no_accent)
 
         self.neighborhood = list(found)
         return self.neighborhood

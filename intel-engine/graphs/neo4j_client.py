@@ -161,6 +161,14 @@ class GraphClient:
         # Normaliza tipologia para UPPER CASE para garantir compatibilidade
         tipo_normalizado = _normalize_property_type(ad_data.get("property_type"))
 
+        # Garante captura de telefone válido caso o original seja LID ou ausente
+        author_phone = original.get("author_phone")
+        from normalizer import is_lid, extract_phone_from_text
+        if is_lid(author_phone):
+            extracted_p = extract_phone_from_text(ad_data.get("raw_text") or "")
+            if extracted_p:
+                author_phone = extracted_p
+
         query = """
         // Pessoa e Mensagem
         MERGE (p:Pessoa {person_id: $person_id})
@@ -230,7 +238,7 @@ class GraphClient:
         with self.driver.session() as session:
             session.run(query, 
                 person_id=person_id,
-                telefone=original.get("author_phone"),
+                telefone=author_phone,
                 nome=original.get("author_name", "Desconhecido"),
                 msg_id=message_id,
                 property_id=property_id,

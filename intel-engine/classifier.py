@@ -93,7 +93,17 @@ class Message:
     def __init__(self, data_line: Dict[str, Any]):
         self.data = data_line
         self.author_name = data_line.get("author_name", "Desconhecido")
-        self.author_phone = data_line.get("author_phone", "Desconhecido")
+        raw_phone = data_line.get("author_phone", "Desconhecido")
+        
+        # Recupera telefone do texto caso seja um LID ou esteja desconhecido
+        from normalizer import extract_phone_from_text, is_lid
+        if is_lid(raw_phone):
+            extracted = extract_phone_from_text(data_line.get("message", ""))
+            self.author_phone = extracted if extracted else raw_phone
+            if extracted:
+                self.data["author_phone"] = extracted
+        else:
+            self.author_phone = raw_phone
         self.raw_message = data_line.get("message", "")
         self.normalized_message = normalize_text(self.raw_message)
         self.doc = nlp(self.normalized_message)
