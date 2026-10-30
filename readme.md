@@ -172,7 +172,12 @@ from database import get_db_connection
 from pathlib import Path
 conn = get_db_connection()
 cur = conn.cursor()
-for m in ['../migrations/001_align_opportunities_contract.sql', '../migrations/002_add_inventory_sync_state.sql', '../migrations/003_relax_opportunity_property_reference.sql']:
+for m in [
+    '../migrations/001_align_opportunities_contract.sql',
+    '../migrations/002_add_inventory_sync_state.sql',
+    '../migrations/003_relax_opportunity_property_reference.sql',
+    '../migrations/004_relax_opportunity_seller_message_reference.sql'
+]:
     cur.execute(Path(m).read_text(encoding='utf-8'))
 conn.commit()
 conn.close()
