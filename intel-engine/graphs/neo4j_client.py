@@ -71,14 +71,15 @@ def _resolve_offer_id(original: dict, message_id: str) -> str:
 
 
 def _normalize_neighborhood(value: str) -> str:
-    """Normalize neighborhood name to UPPER CASE for consistent graph matching.
+    """Normalize neighborhood name to its canonical graph form.
 
-    All Bairro nodes must share the same case convention so that
-    MERGE and MATCH statements unify nodes regardless of whether the
-    name originates from the NLP normalizer (already upper-case) or
-    from the PostgreSQL inventory (title-case from bairros.nome).
+    Maps all known aliases and variations (e.g. 'Barra da Tijuca' -> 'BARRA',
+    'Recreio dos Bandeirantes' -> 'RECREIO', 'Barra Olímpica' -> 'BARRA OLIMPICA')
+    to ensure perfect unification of Bairro nodes across external broker messages
+    and internal inventory.
     """
-    return value.strip().upper()
+    from normalizer import canonical_neighborhood
+    return canonical_neighborhood(value)
 
 
 def _normalize_property_type(value) -> str | None:
@@ -146,17 +147,18 @@ class GraphClient:
         demand_id = _resolve_demand_id(original, message_id) if buying else None
         offer_id = _resolve_offer_id(original, message_id) if not buying else None
 
-        # Normaliza bairros para UPPER CASE para garantir unificação dos nós Bairro
-        # independente da origem (NLP normalizer vs inventário PostgreSQL).
-        bairros = [
-            _normalize_neighborhood(str(bairro))
-            for bairro in (ad_data.get("neighborhood") or [])
-            if bairro and str(bairro).strip().lower() != "desconhecido"
-        ]
-        bairro_principal = bairros[0] if bairros else "DESCONHECIDO"
+        # Normaliza bairros para formato canônico garantindo unificação dos nós Bairro
+        bairros = []
+        for bairro in (ad_data.get("neighborhood") or []):
+            if bairro and str(bairro).strip().lower() != "desconhecido":
+                canon = _normalize_neighborhood(str(bairro))
+                if canon not in bairros:
+                    bairros.append(canon)
+        if not bairros:
+            bairros = ["DESCONHECIDO"]
+        bairro_principal = bairros[0]
 
         # Normaliza tipologia para UPPER CASE para garantir compatibilidade
-        # entre Demanda (vinda do NLP) e Imovel (vindo do inventário).
         tipo_normalizado = _normalize_property_type(ad_data.get("property_type"))
 
         query = """
@@ -211,8 +213,10 @@ class GraphClient:
                 i.perto_praia = $perto_praia,
                 // preco é legado para o matcher atual; o preço canônico fica na Oferta.
                 i.preco = $preco
-            MERGE (b:Bairro {nome: $bairro})
-            MERGE (i)-[:LOCALIZADO_EM]->(b)
+            FOREACH (neighborhood IN $bairros |
+                MERGE (b:Bairro {nome: neighborhood})
+                MERGE (i)-[:LOCALIZADO_EM]->(b)
+            )
             MERGE (o:Oferta {offer_id: $offer_id})
             ON CREATE SET o.created_at = $created_at
             SET o.price = $preco,

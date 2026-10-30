@@ -2,6 +2,7 @@ import re
 import spacy
 import json
 import os
+import unicodedata
 
 nlp = spacy.load("pt_core_news_lg")
 
@@ -22,6 +23,69 @@ ZONES = config["ZONES"]
 CONDOMINIUM = config["CONDOMINIUM"]
 
 SUB_NEIGHBORHOODS = list(NEIGHBORHOOD_PARENT.keys())
+
+
+def remove_accents_str(text: str) -> str:
+    """Remove acentos de uma string para comparações case/accent-insensitive."""
+    if not text:
+        return ""
+    return "".join(
+        c for c in unicodedata.normalize("NFD", text)
+        if unicodedata.category(c) != "Mn"
+    )
+
+
+def canonical_neighborhood(raw_name: str) -> str:
+    """Retorna o nome canônico do bairro para o grafo Neo4j.
+    
+    Garante que nomes originados do banco relacional (ex: 'Barra da Tijuca',
+    'Recreio dos Bandeirantes', 'Barra Olímpica') sejam mapeados para a mesma
+    identidade canônica usada pelo normalizer NLP e pelas demandas dos clientes
+    ('BARRA', 'RECREIO', 'BARRA OLIMPICA').
+    """
+    if not raw_name:
+        return "DESCONHECIDO"
+    name = raw_name.strip().lower()
+
+    # 1. Alias exato
+    if name in NEIGHBORHOOD_ALIASES:
+        return NEIGHBORHOOD_ALIASES[name]
+
+    # 2. Alias sem acentos
+    name_no_acc = remove_accents_str(name)
+    for alias_key, alias_val in NEIGHBORHOOD_ALIASES.items():
+        if remove_accents_str(alias_key) == name_no_acc:
+            return alias_val
+
+    # 3. Sub-bairro / parent
+    if name in NEIGHBORHOOD_PARENT:
+        return NEIGHBORHOOD_PARENT[name]
+    for parent_key, parent_val in NEIGHBORHOOD_PARENT.items():
+        if remove_accents_str(parent_key) == name_no_acc:
+            return parent_val
+
+    # 4. Busca em bairros conhecidos (longest first)
+    for nb in sorted(NEIGHBORHOODS, key=len, reverse=True):
+        nb_no_acc = remove_accents_str(nb)
+        if nb in name or nb_no_acc in name_no_acc:
+            return NEIGHBORHOOD_ALIASES.get(nb, nb.upper())
+
+    return raw_name.strip().upper()
+
+
+def normalize_sun_type(value) -> str | None:
+    """Normaliza o tipo de sol para os valores canônicos do matcher: 'MANHA', 'TARDE', 'PASSANTE'."""
+    if not value:
+        return None
+    val_clean = remove_accents_str(str(value).strip().upper())
+    if "MANHA" in val_clean:
+        return "MANHA"
+    if "TARDE" in val_clean:
+        return "TARDE"
+    if "PASSANTE" in val_clean:
+        return "PASSANTE"
+    return val_clean
+
 
 class NormalizedAd:
     def __init__(self, raw_text: str, intent: str, original_content: dict | None = None):
@@ -122,42 +186,70 @@ class NormalizedAd:
                     continue
 
         if not prices:
-            informal = self._parse_money(text)
-            if informal:
-                prices.extend(informal)
-
-        if not prices:
             self.price = None
             return self.price
 
-        if self.intent == "sell":
-            self.price = min(prices)
-        else:
-            self.price = max(prices)
-
+        self.price = max(prices)
         return self.price
 
-    def _parse_money(self, text: str):
-        results = []
+    def extract_area(self):
+        text = self.raw_text.lower()
+        areas = []
 
         patterns = [
-            (r"(\d+(?:[\.,]\d+)?)\s*milh[oõ]es", 1_000_000),
-            (r"(\d+(?:[\.,]\d+)?)\s*milh[aã]o", 1_000_000),
-            (r"(\d+(?:[\.,]\d+)?)\s*mi\b", 1_000_000),
-            (r"(\d+(?:[\.,]\d+)?)\s*mil\b", 1_000),
-            (r"(\d+(?:[\.,]\d+)?)\s*k\b", 1_000),
+            r"(\d{2,4})\s*m²",
+            r"(\d{2,4})\s*m2",
+            r"(\d{2,4})\s*metros\s*quadrados",
         ]
 
-        for pattern, multiplier in patterns:
+        for pattern in patterns:
             matches = re.findall(pattern, text)
             for m in matches:
                 try:
-                    value = float(m.replace(",", "."))
-                    results.append(int(value * multiplier))
+                    areas.append(int(m))
                 except ValueError:
                     continue
 
-        return results if results else None
+        if not areas:
+            self.area_m2 = None
+            return self.area_m2
+
+        if self.intent == "sell":
+            self.area_m2 = max(areas)
+        else:
+            self.area_m2 = min(areas)
+
+        return self.area_m2
+
+    def extract_parking_spots(self):
+        text = self.raw_text.lower()
+        spots = []
+
+        patterns = [
+            r"(\d+)\s*vaga[s]?\b",
+            r"vaga[s]?\s*:?\s*(\d+)",
+            r"(\d+)\s*garagem\b",
+            r"garagem\s*:?\s*(\d+)",
+        ]
+
+        for pattern in patterns:
+            matches = re.findall(pattern, text)
+            for m in matches:
+                try:
+                    spots.append(int(m))
+                except ValueError:
+                    continue
+
+        if not spots:
+            self.parking_spots = None
+            return self.parking_spots
+
+        if self.intent == "sell":
+            self.parking_spots = max(spots)
+        else:
+            self.parking_spots = min(spots)
+
+        return self.parking_spots
 
     def extract_bedrooms(self):
         text = self.raw_text.lower()
@@ -239,61 +331,52 @@ class NormalizedAd:
         return self.bedrooms
 
     def _remove_accents(self, text: str) -> str:
-        replacements = {
-            "á": "a",
-            "à": "a",
-            "ã": "a",
-            "â": "a",
-            "é": "e",
-            "ê": "e",
-            "è": "e",
-            "í": "i",
-            "ì": "i",
-            "î": "i",
-            "ó": "o",
-            "õ": "o",
-            "ô": "o",
-            "ò": "o",
-            "ú": "u",
-            "ü": "u",
-            "ù": "u",
-            "ç": "c",
-        }
-        for old, new in replacements.items():
-            text = text.replace(old, new)
-        return text
+        return remove_accents_str(text)
 
     def extract_neighborhood(self):
         masked_accented = self.text
         masked_no_accent = self._remove_accents(self.text)
 
         for cond in sorted(CONDOMINIUM, key=len, reverse=True):
-            cond_lower = cond.lower()
-            cond_no_accent = self._remove_accents(cond_lower)
-            masked_accented = masked_accented.replace(cond_lower, "")
-            masked_no_accent = masked_no_accent.replace(cond_no_accent, "")
+            cond_accented = cond.lower()
+            cond_no_accent = self._remove_accents(cond_accented)
+
+            if cond_accented in masked_accented:
+                masked_accented = masked_accented.replace(
+                    cond_accented, "X" * len(cond)
+                )
+            if cond_no_accent in masked_no_accent:
+                masked_no_accent = masked_no_accent.replace(
+                    cond_no_accent, "X" * len(cond)
+                )
 
         text_accented = masked_accented
         text_no_accent = masked_no_accent
 
+        all_places = sorted(
+            NEIGHBORHOODS + SUB_NEIGHBORHOODS, key=len, reverse=True
+        )
+
         found = set()
         matched_strings = []
-
-        # Busca em bairros + sub-bairros juntos (longest first para evitar falsos parciais)
-        all_places = sorted(NEIGHBORHOODS + SUB_NEIGHBORHOODS, key=len, reverse=True)
 
         for bairro in all_places:
             bairro_no_accent = self._remove_accents(bairro)
 
             in_text = (bairro in text_accented) or (bairro_no_accent in text_no_accent)
+
             if not in_text:
                 continue
 
-            already_covered = any(
-                bairro_no_accent in self._remove_accents(longer)
+            contained_in_matched = any(
+                bairro in longer
+                or (
+                    bairro_no_accent in self._remove_accents(longer)
+                    and longer not in NEIGHBORHOOD_PARENT
+                )
                 for longer in matched_strings
             )
-            if already_covered:
+            if contained_in_matched:
                 continue
 
             matched_strings.append(bairro)
@@ -302,7 +385,6 @@ class NormalizedAd:
 
             parent = NEIGHBORHOOD_PARENT.get(bairro)
             if parent:
-                # E um sub-bairro: adiciona o parent e registra o sub-bairro detectado
                 found.add(parent)
                 self.sub_neighborhood = canonical
 
@@ -355,65 +437,6 @@ class NormalizedAd:
 
         return self.sun_type
 
-    def extract_parking_spots(self):
-        text = self.raw_text.lower()
-        spots = []
-
-        patterns = [
-            r"(\d+)\s*vaga[s]?\b",
-            r"vaga[s]?\s*:?\s*(\d+)",
-            r"(\d+)\s*garagem\b",
-            r"garagem\s*:?\s*(\d+)",
-        ]
-
-        for pattern in patterns:
-            matches = re.findall(pattern, text)
-            for m in matches:
-                try:
-                    spots.append(int(m))
-                except ValueError:
-                    continue
-
-        if not spots:
-            self.parking_spots = None
-            return self.parking_spots
-
-        if self.intent == "sell":
-            self.parking_spots = max(spots)
-        else:
-            self.parking_spots = min(spots)
-
-        return self.parking_spots
-
-    def extract_area(self):
-        text = self.raw_text.lower()
-        areas = []
-
-        patterns = [
-            r"(\d{2,4})\s*m²",
-            r"(\d{2,4})\s*m2",
-            r"(\d{2,4})\s*metros\s*quadrados",
-        ]
-
-        for pattern in patterns:
-            matches = re.findall(pattern, text)
-            for m in matches:
-                try:
-                    areas.append(int(m))
-                except ValueError:
-                    continue
-
-        if not areas:
-            self.area_m2 = None
-            return self.area_m2
-
-        if self.intent == "sell":
-            self.area_m2 = max(areas)
-        else:
-            self.area_m2 = min(areas)
-
-        return self.area_m2
-
     def extract_zone(self):
         text_no_accent = self._remove_accents(self.raw_text.lower())
 
@@ -451,7 +474,6 @@ class NormalizedAd:
         self.extract_sun_type()
 
         if self.intent == "sell" and len(self.neighborhood) > 1:
-            # Se há sub-bairro, ele deve ser o valor retido (é o mais específico)
             if self.sub_neighborhood and self.sub_neighborhood in self.neighborhood:
                 self.neighborhood = [self.sub_neighborhood]
             else:
@@ -477,7 +499,6 @@ class NormalizedAd:
 
 
 def run_normalizer(sellers, buyers):
-
     sellers_padronized = []
     buyers_padronized = []
 

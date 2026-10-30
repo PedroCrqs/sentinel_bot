@@ -44,11 +44,51 @@ def fingerprint_property(property_data: dict) -> str:
 
 
 def property_to_inventory_ad(property_data: dict) -> dict:
-    """Adapt a canonical property to the existing inventory graph contract."""
+    """Adapt a canonical property to the inventory graph contract, enriching
+    semantic attributes (seafront, nearbeach, condominium, sun_type) from the
+    property description via NLP normalization.
+    """
+    from normalizer import NormalizedAd, canonical_neighborhood, normalize_sun_type
+
     property_id = property_data["property_id"]
+    description = property_data.get("description") or ""
+
+    # Extrai atributos semânticos da coluna descrição utilizando o classificador NLP
+    seafront = False
+    nearbeach = False
+    condominium = False
+    extra_neighborhoods = []
+    nlp_sun = None
+
+    if description and description.strip():
+        try:
+            norm_ad = NormalizedAd(description, intent="sell")
+            extracted = norm_ad.normalize()
+            seafront = bool(extracted.get("seafront", False))
+            nearbeach = bool(extracted.get("nearbeach", False))
+            condominium = bool(extracted.get("condominium"))
+            extra_neighborhoods = extracted.get("neighborhood") or []
+            nlp_sun = extracted.get("sun_type")
+        except Exception as exc:
+            LOGGER.warning("nlp normalization error for property_id=%s: %s", property_id, exc)
+
+    # Normalização canônica do bairro de cadastro (ex: Barra da Tijuca -> BARRA, Recreio -> RECREIO)
+    raw_neighborhood = property_data.get("neighborhood") or ""
+    canon_neighborhood = canonical_neighborhood(raw_neighborhood)
+
+    # Lista de bairros: canônico como primário, complementado com sub-bairros da descrição
+    neighborhoods = [canon_neighborhood]
+    for n in extra_neighborhoods:
+        if n and n != canon_neighborhood and n not in neighborhoods:
+            neighborhoods.append(n)
+
+    # Posição solar: normalizada para MANHA, TARDE, PASSANTE
+    raw_sun = property_data.get("sun_type") or nlp_sun
+    sun_type = normalize_sun_type(raw_sun)
+
     return {
         "original_content": {
-            "author_name": "Majesto (ImÃ³vel PrÃ³prio)",
+            "author_name": "Majesto (Imóvel Próprio)",
             "author_id": "system:majesto",
             "author_phone": None,
             "message_id": f"self-{property_id}",
@@ -57,14 +97,17 @@ def property_to_inventory_ad(property_data: dict) -> dict:
             "source": "inventory",
         },
         "intent": "oferece",
-        "raw_text": property_data.get("description") or "",
-        "neighborhood": [property_data["neighborhood"]],
+        "raw_text": description,
+        "neighborhood": neighborhoods,
         "property_type": property_data.get("property_type"),
         "price": property_data.get("price"),
         "bedrooms": property_data.get("bedrooms"),
         "area_m2": property_data.get("area"),
         "parking_spots": property_data.get("parking_spots"),
-        "seafront": None,
+        "seafront": seafront,
+        "condominium": condominium,
+        "nearbeach": nearbeach,
+        "sun_type": sun_type,
         "status": property_data["status"],
     }
 

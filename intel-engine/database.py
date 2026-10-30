@@ -92,44 +92,11 @@ def get_inventory_snapshot() -> list[dict]:
 def get_property_details() -> list[dict]:
     """
     Retorna os imóveis próprios estruturados diretamente para a ingestão do Neo4j,
-    ignorando completamente a necessidade de passar pelo normalizer (spaCy).
+    utilizando a adaptação canônica e enriquecimento semântico de property_to_inventory_ad.
     """
+    from inventory_sync import property_to_inventory_ad
     properties_available = get_available_properties()
-    properties_details = []
-    
-    for prop in properties_available:
-        description = prop.get("description")
-        if not description:
-            continue
-            
-        imovel_id = prop["property_id"]
-        
-        # Cria a estrutura exata que o `ingest_ad` do neo4j_client.py espera
-        properties_details.append({
-            "original_content": {
-                "author_name": "Majesto (Imóvel Próprio)",
-                "author_id": "system:majesto",
-                "author_phone": None,
-                "message_id": f"self-{imovel_id}",
-                "timestamp": int(time.time()),
-                "imovel_id": imovel_id,
-                "source": "inventory",
-            },
-            "intent": "oferece",
-            "raw_text": description,
-            # Adapte as chaves (bairro, tipo, etc.) para corresponderem às colunas reais do seu DB
-            "neighborhood": [prop["neighborhood"]],
-            "property_type": prop["property_type"],
-            "price": prop["price"],
-            "bedrooms": prop["bedrooms"],
-            "area_m2": prop["area"],
-            "parking_spots": prop["parking_spots"],
-            # The external schema has no frente_mar column: None means unknown.
-            "seafront": None,
-            "status": prop["status"],
-        })
-
-    return properties_details
+    return [property_to_inventory_ad(prop) for prop in properties_available]
 
 
 # ==============================================================================
