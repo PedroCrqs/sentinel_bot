@@ -57,6 +57,10 @@ Based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 #### Fixed
 
+- **System Chromium binary & `protocolTimeout` resilience** _(wpp-collector/client.js, wpp-egress/main.js)_
+  - Configured Puppeteer to prefer `/usr/bin/chromium` (or `PUPPETEER_EXECUTABLE_PATH`) instead of the cached Puppeteer Chrome 146 binary, eliminating >300% CPU spikes, `Page.navigate timed out` failures, and post-auth `ready` stalls.
+  - Increased `protocolTimeout` to `300000` ms (configurable via `PUPPETEER_PROTOCOL_TIMEOUT_MS`).
+
 - **WhatsApp Web `/login/` route timeout and Chromium profile lock loops** _(wpp-collector, wpp-egress)_
   - Updated `whatsapp-web.js` in `wpp-collector/package.json` and `wpp-egress/package.json` to upstream commit `38eb45b` (`wwebjs/whatsapp-web.js#201990`, via HTTPS tarball), resolving the `/login/` route `WAWebSocketModel` timeout (`Waiting failed: 30000ms exceeded`) and replacing the deleted fork reference.
   - Removed the obsolete remote `webVersionCache` override (`2.3000.1014589918-alpha.html` returning HTTP 404) from `wpp-collector/client.js`.
@@ -135,6 +139,10 @@ Based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **Sanitização de Tipos Numéricos**: Conversão de `decimal.Decimal` do PostgreSQL para `float` em todos os adaptadores para compatibilidade com o protocolo Bolt.
 
 #### Corrigido
+
+- **Uso do Chromium do sistema e aumento de `protocolTimeout`** _(wpp-collector/client.js, wpp-egress/main.js)_
+  - Configurado o Puppeteer para utilizar `/usr/bin/chromium` (ou `PUPPETEER_EXECUTABLE_PATH`) em vez do binário Chrome 146 em cache do Puppeteer, eliminando picos de >300% de CPU, falhas `Page.navigate timed out` e travamentos pós-autenticação antes do evento `ready`.
+  - Aumentado `protocolTimeout` para `300000` ms (configurável via `PUPPETEER_PROTOCOL_TIMEOUT_MS`).
 
 - **Timeout na rota `/login/` do WhatsApp Web e loops de lock de perfil do Chromium** _(wpp-collector, wpp-egress)_
   - Atualizada a dependência `whatsapp-web.js` em `wpp-collector/package.json` e `wpp-egress/package.json` para o commit upstream `38eb45b` (`wwebjs/whatsapp-web.js#201990`, via tarball HTTPS), resolvendo o timeout de `WAWebSocketModel` na rota `/login/` (`Waiting failed: 30000ms exceeded`) e substituindo a referência ao fork removido.
