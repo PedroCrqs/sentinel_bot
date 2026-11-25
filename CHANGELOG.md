@@ -5,11 +5,15 @@ Based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
-## [2.0.0] - 2026-10-29
+## [2.0.0] - Unreleased
 
 ### English
 
 #### Added
+
+- **Post-authentication `ready` watchdog and Chromium `pageerror` diagnostics** _(wpp-collector/client.js, wpp-egress/main.js)_
+  - Added `attachPageErrorDiagnostics()` to surface silent browser-side or Puppeteer `exposeFunction` rejections into logs and trigger immediate recovery on critical filesystem/injection errors (`EACCES`, `EROFS`, `ENOSPC`, `ready timeout`).
+  - Added `armAuthReadyWatchdog()` (configurable via `AUTH_READY_TIMEOUT_MS`, default `120000` ms) to detect sessions stuck between `authenticated` and `ready`, destroy Chromium safely, and schedule a clean restart.
 
 - **Automatic Phone Number Resolution and Extraction Pipeline**:
   - `wpp-collector/ingest.js`: Automatically resolves real phone numbers for WhatsApp users when messages are received from privacy-shielded `@lid` identifiers by leveraging WhatsApp Web client `getContactLidAndPhone` retrieval.
@@ -53,6 +57,12 @@ Based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 #### Fixed
 
+- **WhatsApp Web `/login/` route timeout and Chromium profile lock loops** _(wpp-collector, wpp-egress)_
+  - Updated `whatsapp-web.js` in `wpp-collector/package.json` and `wpp-egress/package.json` to upstream commit `38eb45b` (`wwebjs/whatsapp-web.js#201990`, via HTTPS tarball), resolving the `/login/` route `WAWebSocketModel` timeout (`Waiting failed: 30000ms exceeded`) and replacing the deleted fork reference.
+  - Removed the obsolete remote `webVersionCache` override (`2.3000.1014589918-alpha.html` returning HTTP 404) from `wpp-collector/client.js`.
+  - Explicitly set `webVersionCache: { type: "none" }` in both `wpp-collector/client.js` and `wpp-egress/main.js` so WhatsApp Web loads live without writing `./.wwebjs_cache/` files or hitting silent `EACCES` rejections in post-auth callbacks.
+  - Added `cleanStaleSessionLocks()` before `client.initialize()` to clear orphaned Chromium `SingletonLock`, `SingletonSocket`, and `SingletonCookie` files.
+  - Added centralized, re-entrancy-safe `scheduleRestart()` calling `await client.destroy()` before retrying, preventing `The browser is already running` retry loops, plus graceful `SIGTERM` shutdown cleanup.
 - **Database Connection Pool Leak in Cleaner & Backfill (`cleaner.py`, `backfill_history.py`)**: `purge_old_data_sql` and `load_candidate_messages` acquired PostgreSQL connections from the pool but never released them via `release_db_connection()`. In long-running engine deployments, this exhausted the pool (`maxconn=10`) every ~54 hours and stalled all database lookups. Fixed by wrapping execution in `try...finally: release_db_connection(conn)`.
 - **False Self-Inventory Privilege Spoofing Prevention (`engine.py`, `wpp-egress/main.js`)**: Replaced loose pushname matching (`"majesto" in seller_name`) with strict identity verification (`offer_id.startswith("self-offer:")`, `opp["is_self"] = True`, or `seller_id == "system:majesto"`), preventing external third-party brokers with "Majesto" in their WhatsApp profile from spoofing internal inventory privileges.
 - **Atomic Opportunity Claim in Egress (`wpp-egress/main.js`)**: Implemented atomic reservation using `UPDATE opportunities SET dispatch_status = 'SENDING' WHERE opportunity_id = $1 AND dispatch_status = 'PENDING' RETURNING match_details` before dispatch, preventing duplicate message sends and race conditions.
@@ -79,6 +89,10 @@ Based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### Português
 
 #### Adicionado
+
+- **Watchdog pós-autenticação (`ready`) e diagnóstico de `pageerror` do Chromium** _(wpp-collector/client.js, wpp-egress/main.js)_
+  - Adicionada `attachPageErrorDiagnostics()` para expor nos logs rejeições silenciosas do browser ou de callbacks `exposeFunction` do Puppeteer, com recuperação imediata em erros críticos de sistema de arquivos/injeção (`EACCES`, `EROFS`, `ENOSPC`, `ready timeout`).
+  - Adicionada `armAuthReadyWatchdog()` (configurável via `AUTH_READY_TIMEOUT_MS`, padrão `120000` ms) para detectar sessões presas entre `authenticated` e `ready`, encerrar o Chromium com segurança e agendar reinicialização limpa.
 
 - **Pipeline de Resolução e Extração Automática de Telefones**:
   - `wpp-collector/ingest.js`: Resolução automática de números reais de telefone quando a mensagem é originada de identificadores ocultos `@lid`, utilizando `getContactLidAndPhone` do cliente WhatsApp Web.
@@ -122,6 +136,12 @@ Based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 #### Corrigido
 
+- **Timeout na rota `/login/` do WhatsApp Web e loops de lock de perfil do Chromium** _(wpp-collector, wpp-egress)_
+  - Atualizada a dependência `whatsapp-web.js` em `wpp-collector/package.json` e `wpp-egress/package.json` para o commit upstream `38eb45b` (`wwebjs/whatsapp-web.js#201990`, via tarball HTTPS), resolvendo o timeout de `WAWebSocketModel` na rota `/login/` (`Waiting failed: 30000ms exceeded`) e substituindo a referência ao fork removido.
+  - Removido o override remoto obsoleto de `webVersionCache` (`2.3000.1014589918-alpha.html`, que retornava HTTP 404) de `wpp-collector/client.js`.
+  - Configurado explicitamente `webVersionCache: { type: "none" }` tanto em `wpp-collector/client.js` quanto em `wpp-egress/main.js`, garantindo carregamento ao vivo do WhatsApp Web sem gravação em `./.wwebjs_cache/` nem rejeições silenciosas de `EACCES` após autenticação.
+  - Adicionada a função `cleanStaleSessionLocks()` antes de `client.initialize()` para remover arquivos órfãos `SingletonLock`, `SingletonSocket` e `SingletonCookie` do Chromium.
+  - Adicionada a função centralizada `scheduleRestart()` com proteção contra reentrância e `await client.destroy()` antes de nova tentativa, evitando loops de `The browser is already running`, além de encerramento gracioso no sinal `SIGTERM`.
 - **Flexibilização na Normalização de Preços sem Prefixo Monetário (`normalizer.py`)**:
   - O método `extract_price()` exigia a presença explícita do símbolo `R$`, falhando em mensagens como `"por 800k"`, `"até 800 mil"`, `"800k"`, `"1.8M"` e valores numéricos formatados (`800.000`).
   - Implementado extrator multi-padrão com suporte a prefixos operacionais (`valor`, `preco`, `ate`, `por`, `teto`, `orcamento`), multiplicadores (`k`, `mil`, `mi`, `m`, `milhão`, `milhões`) e milhares pontuados com piso mínimo de R$ 50.000,00.
