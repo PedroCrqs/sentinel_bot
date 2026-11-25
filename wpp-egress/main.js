@@ -57,6 +57,10 @@ const client = new Client({
   },
   puppeteer: {
     headless: true,
+    ...(process.env.PUPPETEER_EXECUTABLE_PATH || fs.existsSync("/usr/bin/chromium")
+      ? { executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || "/usr/bin/chromium" }
+      : {}),
+    protocolTimeout: Number(process.env.PUPPETEER_PROTOCOL_TIMEOUT_MS) || 300_000,
     args: [
       "--no-sandbox",
       "--disable-setuid-sandbox",
