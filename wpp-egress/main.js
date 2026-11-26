@@ -467,6 +467,8 @@ async function startRabbitMQConsumer() {
     });
   } catch (error) {
     console.error("❌ [RABBITMQ] Erro no consumidor do Egress:", error);
+    console.warn("🔄 [RABBITMQ] Tentando reconectar consumidor do Egress em 5s...");
+    setTimeout(startRabbitMQConsumer, 5000);
   }
 }
 

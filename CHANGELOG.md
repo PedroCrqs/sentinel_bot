@@ -57,6 +57,11 @@ Based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 #### Fixed
 
+- **RabbitMQ & PostgreSQL startup retry and auto-reconnection** _(wpp-collector/rabbitmq.js, wpp-collector/db.js, wpp-egress/main.js)_
+  - Added exponential-backoff reconnection (`5s` to `30s`) and `connection`/`channel` `close`/`error` handlers in `wpp-collector/rabbitmq.js`, preventing `rabbitChannel` from staying `null` permanently when PM2 boots before Docker containers (`ECONNREFUSED ::1:5672`) or when RabbitMQ restarts.
+  - Added startup retry loop in `loadStateFromDB()` (`wpp-collector/db.js`) so deduplication state loads reliably even when PostgreSQL is still initializing.
+  - Added automatic 5s retry in `startRabbitMQConsumer()` (`wpp-egress/main.js`) if the initial RabbitMQ connection fails after WhatsApp `ready`.
+
 - **System Chromium binary & `protocolTimeout` resilience** _(wpp-collector/client.js, wpp-egress/main.js)_
   - Configured Puppeteer to prefer `/usr/bin/chromium` (or `PUPPETEER_EXECUTABLE_PATH`) instead of the cached Puppeteer Chrome 146 binary, eliminating >300% CPU spikes, `Page.navigate timed out` failures, and post-auth `ready` stalls.
   - Increased `protocolTimeout` to `300000` ms (configurable via `PUPPETEER_PROTOCOL_TIMEOUT_MS`).
@@ -139,6 +144,11 @@ Based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **Sanitização de Tipos Numéricos**: Conversão de `decimal.Decimal` do PostgreSQL para `float` em todos os adaptadores para compatibilidade com o protocolo Bolt.
 
 #### Corrigido
+
+- **Retry na inicialização e reconexão automática com RabbitMQ e PostgreSQL** _(wpp-collector/rabbitmq.js, wpp-collector/db.js, wpp-egress/main.js)_
+  - Adicionada reconexão com backoff exponencial (`5s` a `30s`) e listeners `close`/`error` de conexão e canal em `wpp-collector/rabbitmq.js`, evitando que `rabbitChannel` permaneça `null` quando o PM2 inicia antes dos containers Docker (`ECONNREFUSED ::1:5672`) ou quando o RabbitMQ reinicia.
+  - Adicionado loop de retry na inicialização de `loadStateFromDB()` (`wpp-collector/db.js`) para carregar o cache de deduplicação mesmo durante o boot do PostgreSQL.
+  - Adicionado retry automático de 5s em `startRabbitMQConsumer()` (`wpp-egress/main.js`) caso a conexão inicial com o RabbitMQ falhe após o evento `ready`.
 
 - **Uso do Chromium do sistema e aumento de `protocolTimeout`** _(wpp-collector/client.js, wpp-egress/main.js)_
   - Configurado o Puppeteer para utilizar `/usr/bin/chromium` (ou `PUPPETEER_EXECUTABLE_PATH`) em vez do binário Chrome 146 em cache do Puppeteer, eliminando picos de >300% de CPU, falhas `Page.navigate timed out` e travamentos pós-autenticação antes do evento `ready`.
